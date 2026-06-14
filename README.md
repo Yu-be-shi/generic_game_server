@@ -222,6 +222,14 @@ terraform workspace delete palworld
 - AWS Budgets で月$13の上限を設定済み（20/50/80/100% でアラート通知）
 - コスト通知は Discord の Webhook チャンネルに届く
 - 複数のゲームが同時に起動すると費用が倍増するため注意
+- 詳細なコスト試算・削減手順 → [`docs/cost-plan.md`](docs/cost-plan.md)
+
+## セーブデータ移行
+
+ローカル/Co-op のセーブをダディケーテッドサーバーへ移したい場合は、バックアップ Lambda の `restore` アクションを使う。
+
+- 汎用手順書 → [`docs/save-migration-runbook.md`](docs/save-migration-runbook.md)
+- Palworld 固有の手順（ホストキャラ GUID 変換 / PlM 形式対応） → [`docs/palworld-save-migration.md`](docs/palworld-save-migration.md)
 
 ---
 
