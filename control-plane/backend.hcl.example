@@ -1,0 +1,12 @@
+# control-plane 用 Terraform backend 設定
+#
+# 使い方:
+#   1. このファイルを backend.hcl という名前でコピー
+#   2. bucket の値を `terraform output -raw tf_state_bucket_name` の出力で置き換え
+#   3. terraform init -migrate-state -backend-config=backend.hcl
+#
+# backend.hcl は .gitignore 済みのためコミットされない（アカウント情報を含むため）
+
+bucket = "tf-state-<YOUR_ACCOUNT_ID>"  # ← ここを置き換える
+key    = "control-plane/terraform.tfstate"
+region = "ap-northeast-1"

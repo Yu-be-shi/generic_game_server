@@ -1,0 +1,18 @@
+# game-stack 用 Terraform backend 設定
+#
+# 使い方:
+#   1. このファイルを backend.hcl という名前でコピー
+#   2. bucket の値を `cd ../control-plane && terraform output -raw tf_state_bucket_name` の出力で置き換え
+#   3. terraform workspace select palworld  （移行したい workspace を選択）
+#   4. terraform init -migrate-state -backend-config=backend.hcl
+#      ※ workspace が複数ある場合は workspace ごとに 3-4 を繰り返す
+#
+# workspace の state は S3 上で以下のパスに保存される:
+#   default workspace : game-stack/terraform.tfstate
+#   palworld workspace: game-stack/env:/palworld/game-stack/terraform.tfstate
+#
+# backend.hcl は .gitignore 済みのためコミットされない（アカウント情報を含むため）
+
+bucket = "tf-state-<YOUR_ACCOUNT_ID>"  # ← ここを置き換える
+key    = "game-stack/terraform.tfstate"
+region = "ap-northeast-1"

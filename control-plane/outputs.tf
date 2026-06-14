@@ -2,6 +2,11 @@
 # outputs.tf - control-plane の出力
 # ============================================================
 
+output "tf_state_bucket_name" {
+  description = "Terraform state 保存先の S3 バケット名。backend.hcl に記載して terraform init -migrate-state を実行する"
+  value       = aws_s3_bucket.tf_state.id
+}
+
 output "function_url" {
   description = "Discord Developer Portal の「Interactions Endpoint URL」に設定する URL。apply 直後にここに表示される。"
   value       = aws_lambda_function_url.discord_control.function_url

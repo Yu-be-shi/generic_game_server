@@ -20,6 +20,10 @@ games/*.tfvars
 **/functions/**/*.zip
 **/functions/*.zip
 
+# --- Terraform backend 設定（アカウント固有情報を含むためコミットしない）---
+# backend.hcl.example はコミット対象（テンプレートとして共有）
+**/backend.hcl
+
 # --- その他の機密ファイル ---
 *.pem
 *.key
