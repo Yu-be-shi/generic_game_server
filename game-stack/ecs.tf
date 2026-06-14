@@ -189,9 +189,15 @@ resource "aws_ecs_service" "game" {
   depends_on = [aws_efs_mount_target.main]
 
   lifecycle {
-    # サイドカーが desired_count=0 にした後、次の terraform apply で
-    # 自動で 1 に戻ってしまうことを防ぐ
-    ignore_changes = [desired_count]
+    ignore_changes = [
+      # サイドカーが desired_count=0 にした後、次の terraform apply で
+      # 自動で 1 に戻ってしまうことを防ぐ
+      desired_count,
+      # タスク定義が更新されても稼働中タスクを強制停止しない
+      # コンテナ定義の変更を反映する場合は停止後に手動で
+      # aws ecs update-service --force-new-deployment を実行すること
+      task_definition,
+    ]
   }
 
   tags = {
