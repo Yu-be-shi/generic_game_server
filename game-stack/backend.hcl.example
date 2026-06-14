@@ -13,6 +13,6 @@
 #
 # backend.hcl は .gitignore 済みのためコミットされない（アカウント情報を含むため）
 
-bucket = "tf-state-<YOUR_ACCOUNT_ID>"  # ← ここを置き換える
+bucket = "yubeshi-game-server-terraform-state"
 key    = "game-stack/terraform.tfstate"
 region = "ap-northeast-1"

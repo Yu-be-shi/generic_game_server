@@ -12,7 +12,7 @@
 # 以降は S3 が state の正とな り、ローカルファイルは不要になる。
 
 resource "aws_s3_bucket" "tf_state" {
-  bucket = "tf-state-${data.aws_caller_identity.current.account_id}"
+  bucket = "yubeshi-game-server-terraform-state"
 
   lifecycle {
     # state バケットを誤削除すると全リソースの管理が失われる
