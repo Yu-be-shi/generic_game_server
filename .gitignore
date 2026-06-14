@@ -29,6 +29,7 @@ games/*.tfvars
 *.key
 .env
 .env.*
+!**/.env.example
 
 # --- Python キャッシュ ---
 **/__pycache__/
