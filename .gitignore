@@ -1,0 +1,38 @@
+# =============================================================================
+# .gitignore - generic_game_server 全体共通
+# =============================================================================
+
+# --- Terraform ステートファイル（機密情報を含む・絶対にコミットしない）---
+**/.terraform/
+**/*.tfstate
+**/*.tfstate.*
+**/*.tfplan
+**/*.plan
+
+# --- Terraform ロックファイル（任意。チーム共有時はコメントアウト）---
+# **/.terraform.lock.hcl
+
+# --- 変数ファイル（discord_webhook_url 等の機密情報を含む）---
+games/*.tfvars
+!games/example.tfvars   # example のみコミット対象
+
+# --- Lambda ZIP ファイル（archive_file が自動生成するため不要）---
+**/functions/**/*.zip
+**/functions/*.zip
+
+# --- その他の機密ファイル ---
+*.pem
+*.key
+.env
+.env.*
+
+# --- Python キャッシュ ---
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+
+# --- OS / エディタ ---
+.DS_Store
+.idea/
+.vscode/
+*.swp
