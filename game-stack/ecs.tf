@@ -116,6 +116,8 @@ resource "aws_ecs_task_definition" "game" {
     # ss コマンドでゲームポートへの接続数を透過的に監視できる。
     # essential=false のため、サイドカーが停止してもゲームコンテナは継続する。
     # Fargate はタスク単位課金のため追加コストはゼロ。
+    #
+    # EFS もマウントし、サーバー停止直前に S3 へセーブデータを同期する。
     {
       name      = "monitor"
       image     = "amazonlinux:2023"
@@ -124,7 +126,7 @@ resource "aws_ecs_task_definition" "game" {
       # scripts/auto_shutdown.sh の内容をインラインで埋め込む（ECR / Dockerfile 不要）
       command = ["sh", "-c", file("${path.module}/scripts/auto_shutdown.sh")]
 
-      # Terraform から監視設定を環境変数として注入
+      # Terraform から監視設定・バックアップ設定を環境変数として注入
       environment = [
         { name = "CLUSTER_NAME", value = local.cluster_name },
         { name = "SERVICE_NAME", value = local.service_name },
@@ -133,7 +135,18 @@ resource "aws_ecs_task_definition" "game" {
         { name = "MONITOR_PROTOCOL", value = var.monitor_protocol },
         { name = "IDLE_MINUTES", value = tostring(var.idle_timeout_minutes) },
         { name = "CHECK_INTERVAL", value = "60" },
+        # 停止前バックアップ用（auto_shutdown.sh が参照する）
+        { name = "BACKUP_BUCKET", value = aws_s3_bucket.backup.id },
+        { name = "BACKUP_PREFIX", value = local.name_prefix },
+        { name = "EFS_MOUNT_PATH", value = var.efs_mount_path },
       ]
+
+      # セーブデータを読み取るために EFS をマウント（読み取り専用）
+      mountPoints = [{
+        sourceVolume  = "efs-data"
+        containerPath = var.efs_mount_path
+        readOnly      = true
+      }]
 
       logConfiguration = {
         logDriver = "awslogs"

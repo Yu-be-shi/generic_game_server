@@ -86,6 +86,20 @@ resource "aws_iam_role_policy" "task_permissions" {
           "elasticfilesystem:ClientRootAccess"
         ]
         Resource = aws_efs_file_system.main.arn
+      },
+      {
+        # 停止前バックアップ用（auto_shutdown.sh が aws s3 sync を実行する際に使用）
+        Sid    = "S3Backup"
+        Effect = "Allow"
+        Action = [
+          "s3:PutObject",
+          "s3:GetObject",
+          "s3:ListBucket"
+        ]
+        Resource = [
+          aws_s3_bucket.backup.arn,
+          "${aws_s3_bucket.backup.arn}/*"
+        ]
       }
     ]
   })

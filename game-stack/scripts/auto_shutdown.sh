@@ -206,6 +206,23 @@ PYEOF
             echo "[monitor] aws ecs update-service --desired-count 0"
             echo "[monitor] ========================================"
 
+            # -------------------------------------------------------
+            # 停止前バックアップ: EFS → S3 同期
+            # BACKUP_BUCKET が設定されている場合のみ実行する
+            # -------------------------------------------------------
+            if [ -n "${BACKUP_BUCKET:-}" ]; then
+                echo "[monitor] 停止前バックアップ開始: ${EFS_MOUNT_PATH} -> s3://${BACKUP_BUCKET}/${BACKUP_PREFIX}/"
+                if aws s3 sync "${EFS_MOUNT_PATH}/" "s3://${BACKUP_BUCKET}/${BACKUP_PREFIX}/" \
+                    --region "${AWS_REGION}" \
+                    --no-progress \
+                    2>&1; then
+                    echo "[monitor] バックアップ完了"
+                else
+                    # バックアップ失敗でもサーバー停止は継続する（安全設計）
+                    echo "[monitor] 警告: バックアップ同期に失敗しました。停止処理は継続します。"
+                fi
+            fi
+
             # ECS Service の desired_count を 0 に設定
             # タスクロールの ecs:UpdateService 権限を使って実行する
             if aws ecs update-service \

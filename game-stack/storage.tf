@@ -8,6 +8,12 @@
 resource "aws_efs_file_system" "main" {
   encrypted = true # 保存データを暗号化
 
+  lifecycle {
+    # terraform destroy / apply による誤削除を防止する
+    # EFS を削除したい場合は一時的にこのブロックを外して apply すること
+    prevent_destroy = true
+  }
+
   tags = {
     Name = "${local.name_prefix}-efs"
     Game = var.game_name

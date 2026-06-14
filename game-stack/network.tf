@@ -124,18 +124,21 @@ resource "aws_security_group" "game" {
   }
 }
 
-# EFS 用 SG（ゲーム SG からの NFS:2049 のみ許可）
+# EFS 用 SG（ゲームコンテナおよびバックアップ Lambda からの NFS:2049 を許可）
 resource "aws_security_group" "efs" {
   name        = "${local.name_prefix}-efs-sg"
-  description = "EFS security group - allow NFS from game containers only"
+  description = "EFS security group - allow NFS from game containers and backup Lambda"
   vpc_id      = aws_vpc.main.id
 
   ingress {
-    description     = "NFS from game containers"
-    from_port       = 2049
-    to_port         = 2049
-    protocol        = "tcp"
-    security_groups = [aws_security_group.game.id]
+    description = "NFS from game containers and backup Lambda"
+    from_port   = 2049
+    to_port     = 2049
+    protocol    = "tcp"
+    security_groups = [
+      aws_security_group.game.id,
+      aws_security_group.backup_lambda.id, # バックアップ Lambda からの EFS マウントに必要
+    ]
   }
 
   egress {

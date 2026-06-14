@@ -58,6 +58,11 @@ output "aws_region" {
   value       = var.aws_region
 }
 
+output "backup_bucket_name" {
+  description = "セーブデータのバックアップ先 S3 バケット名。aws s3 sync または S3 コンソールから閲覧・ダウンロード可能"
+  value       = aws_s3_bucket.backup.id
+}
+
 output "server_management_commands" {
   description = "サーバー管理 AWS CLI コマンド集（Discord ボット未使用時の手動操作）"
   value       = <<-EOT
