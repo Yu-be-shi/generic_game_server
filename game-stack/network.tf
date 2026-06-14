@@ -97,7 +97,7 @@ resource "aws_route_table_association" "public" {
 # ゲームサーバー用 SG（game_ports に基づいてポートを動的に開放）
 resource "aws_security_group" "game" {
   name        = "${local.name_prefix}-game-sg"
-  description = "${var.game_name} ゲームサーバー用セキュリティグループ"
+  description = "${var.game_name} game server security group"
   vpc_id      = aws_vpc.main.id
 
   dynamic "ingress" {
@@ -127,7 +127,7 @@ resource "aws_security_group" "game" {
 # EFS 用 SG（ゲーム SG からの NFS:2049 のみ許可）
 resource "aws_security_group" "efs" {
   name        = "${local.name_prefix}-efs-sg"
-  description = "EFS 用（NFS ポートをゲームコンテナの SG のみに許可）"
+  description = "EFS security group - allow NFS from game containers only"
   vpc_id      = aws_vpc.main.id
 
   ingress {

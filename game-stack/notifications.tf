@@ -91,7 +91,7 @@ resource "aws_lambda_function" "notify_ip" {
 # EventBridge ルール（ECS タスクが RUNNING になった時に発火）
 resource "aws_cloudwatch_event_rule" "ecs_running" {
   name        = "${local.name_prefix}-ecs-running"
-  description = "${var.game_name} ECS タスクが RUNNING 状態になった時に IP 通知を発火"
+  description = "${var.game_name} ECS task RUNNING state change - trigger IP notification"
 
   event_pattern = jsonencode({
     source        = ["aws.ecs"]
