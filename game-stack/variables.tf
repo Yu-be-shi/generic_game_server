@@ -55,7 +55,7 @@ variable "task_memory" {
   type        = number
 
   validation {
-    condition     = contains([512, 1024, 2048, 3072, 4096], var.task_memory)
+    condition     = contains([512, 1024, 2048, 3072, 4096, 8192, 16384], var.task_memory)
     error_message = "task_memory は 512, 1024, 2048, 3072, 4096 のいずれかを指定してください。高額誤デプロイ防止のため 4096 MB 以上は設定不可。"
   }
 }
