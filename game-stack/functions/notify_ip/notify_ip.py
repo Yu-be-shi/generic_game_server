@@ -34,7 +34,7 @@ def lambda_handler(event, context):
     detail = event.get("detail", {})
     if detail.get("lastStatus") == "STOPPED":
         try:
-            send_discord_message(f"⚫ **{GAME_NAME}** サーバーが停止しました。")
+            send_discord_message(f"⚫ **{GAME_NAME}** サーバーが完全に停止しました（ECSタスク終了）。課金は発生しません。")
             logger.info("Discord 停止通知送信完了")
         except Exception:
             logger.exception("停止通知の送信に失敗しました")
@@ -109,7 +109,12 @@ def send_discord_message(content: str) -> None:
     req = urllib.request.Request(
         DISCORD_WEBHOOK_URL,
         data=payload,
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            # デフォルトの Python-urllib UA は Cloudflare (Discord) に 403/1010 でブロックされるため
+            # 明示的に User-Agent を指定する
+            "User-Agent": "GameServerBot (https://github.com/yu-be-shi, 1.0)",
+        },
         method="POST",
     )
 

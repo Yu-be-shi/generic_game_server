@@ -172,7 +172,7 @@ def _cmd_stop(game_name: str) -> dict:
         return _ephemeral(f"❌ ゲーム `{game_name}` が見つかりません。")
 
     ecs.update_service(cluster=cluster_arn, service=service_arn, desiredCount=0)
-    return _ephemeral(f"🛑 **{game_name}** を停止しました。")
+    return _ephemeral(f"🛑 **{game_name}** の停止処理を開始しました。完全停止後に通知します。")
 
 
 def _cmd_status(game_name: str) -> dict:

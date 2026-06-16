@@ -83,7 +83,12 @@ def send_discord_message(content: str) -> None:
     req = urllib.request.Request(
         DISCORD_WEBHOOK_URL,
         data=payload,
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            # デフォルトの Python-urllib UA は Cloudflare (Discord) に 403/1010 でブロックされるため
+            # 明示的に User-Agent を指定する
+            "User-Agent": "GameServerBot (https://github.com/yu-be-shi, 1.0)",
+        },
         method="POST",
     )
 

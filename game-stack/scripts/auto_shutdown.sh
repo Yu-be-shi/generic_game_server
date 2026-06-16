@@ -97,8 +97,20 @@ while true; do
 
     # =========================================================================
     # 接続数の取得
+    # MONITOR_METHOD が設定されていない場合は MONITOR_PROTOCOL から後方互換で推定
     # =========================================================================
-    if [ "${MONITOR_PROTOCOL}" = "tcp" ]; then
+    _method="${MONITOR_METHOD:-}"
+    if [ -z "${_method}" ]; then
+        if [ "${MONITOR_PROTOCOL}" = "tcp" ]; then
+            _method="tcp"
+        else
+            _method="a2s"
+        fi
+    fi
+
+    case "${_method}" in
+
+        tcp)
         # ----------------------------------------------------------------
         # TCP 接続数監視（精度高・推奨）
         # ss コマンドで指定ポートへの ESTABLISHED 接続数をカウントする。
@@ -106,23 +118,18 @@ while true; do
         # サイドカーからゲームコンテナのポートを透過的に監視できる。
         # ----------------------------------------------------------------
         conn_count=$(ss -tnH state established "( sport = :${MONITOR_PORT} )" 2>/dev/null | wc -l | tr -d ' \t')
+        ;;
 
-    else
+        a2s)
         # ----------------------------------------------------------------
-        # UDP: Steam A2S_INFO クエリでプレイヤー数を取得
+        # Steam A2S_INFO クエリでプレイヤー数を取得
         #
         # Palworld / Valheim / ARK 等 Steam ベースのゲームは A2S プロトコルに
         # 対応しており、クエリポートにリクエストを送ると現在のプレイヤー数が
         # 取得できる。MONITOR_PORT には Palworld のクエリポート（27015）を設定。
-        #
-        # 安全側の設計:
-        #   - A2S が「0 人」と応答 → アイドル加算（本当に無人なので停止候補）
-        #   - タイムアウト / 無応答 / パースエラー → conn_count=1 で停止しない
-        #     理由: 起動直後はサーバーが A2S に応答しないため誤停止を防ぐ。
-        #     プレイヤーが切断して放置している危険なケースでは A2S は必ず 0 を返す。
         # ----------------------------------------------------------------
         conn_count=$(python3 - <<'PYEOF' 2>/dev/null
-import os, socket, struct, sys
+import os, socket, sys
 
 PORT = int(os.environ["MONITOR_PORT"])
 TIMEOUT = 5
@@ -145,28 +152,20 @@ def query_players(host, port):
 
         # --- Step 2: A2S_INFO レスポンスをパース（0x49 = 'I'）---
         if len(data) < 6 or data[4:5] != b'\x49':
-            # 期待しないレスポンス → 0人扱い（アイドルカウント対象）
             print(0)
             return
 
-        # ヘッダ 4B + type 1B + protocol 1B = offset 6 からサーバー名（null終端）開始
         pos = 6
-        # null 終端文字列を 4 つスキップ: name, map, folder, game
         for _ in range(4):
             end = data.index(b'\x00', pos)
             pos = end + 1
-
-        # AppID (2B little endian) をスキップ
         pos += 2
-
-        # players バイト（現在のプレイヤー数）
         if pos < len(data):
             print(data[pos])
         else:
-            print(0)  # パース失敗 → 0人扱い
+            print(0)
 
     except (socket.timeout, OSError):
-        # タイムアウト / 無応答 → A2S 未対応またはまだ起動中。0人扱いでアイドルカウント
         sys.exit(1)
     except Exception:
         sys.exit(1)
@@ -176,17 +175,77 @@ def query_players(host, port):
 query_players("127.0.0.1", PORT)
 PYEOF
 ) || conn_count=0
-        # python3 が非ゼロ終了した場合（タイムアウト含む）は 0 人扱い
         if ! echo "${conn_count}" | grep -qE '^[0-9]+$'; then
             conn_count=0
         fi
         echo "[monitor] A2S クエリ: conn_count=${conn_count}"
-    fi
+        ;;
+
+        rest)
+        # ----------------------------------------------------------------
+        # Palworld REST API でプレイヤー数を取得（Palworld 推奨方式）
+        #
+        # REST_API_ENABLED=true（thijsvanloef イメージのデフォルト）が前提。
+        # awsvpc でネットワーク名前空間を共有しているため 127.0.0.1 に到達できる。
+        #
+        # 安全側の設計:
+        #   - 正常応答 → players 配列の長さを信頼
+        #   - HTTP 401/403（認証エラー）→ -1（不明）を出力し、アイドル加算をスキップ
+        #     （パスワード誤設定で在室サーバーを誤停止させない）
+        #   - タイムアウト/接続不可 → 0 扱い（起動中は応答しないため誤停止なし）
+        # ----------------------------------------------------------------
+        conn_count=$(python3 - <<'PYEOF' 2>/dev/null
+import os, sys, json, base64
+import urllib.request, urllib.error
+
+PORT = int(os.environ.get("REST_API_PORT", "8212"))
+PASSWORD = os.environ.get("REST_API_PASSWORD", "")
+TIMEOUT = 5
+
+url = "http://127.0.0.1:{}/v1/api/players".format(PORT)
+credentials = base64.b64encode("admin:{}".format(PASSWORD).encode()).decode()
+req = urllib.request.Request(
+    url,
+    headers={
+        "Authorization": "Basic {}".format(credentials),
+        "User-Agent": "GameServerBot/1.0",
+    },
+    method="GET",
+)
+try:
+    with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+        data = json.loads(resp.read().decode())
+        print(len(data.get("players", [])))
+except urllib.error.HTTPError as e:
+    if e.code in (401, 403):
+        print(-1)  # 認証エラー → 不明扱い（アイドル加算しない）
+    else:
+        print(0)   # その他 HTTP エラー → 起動中とみなして 0
+except Exception:
+    print(0)       # タイムアウト/接続不可 → 起動中とみなして 0
+PYEOF
+) || conn_count=0
+        if ! echo "${conn_count}" | grep -qE '^-?[0-9]+$'; then
+            conn_count=0
+        fi
+        echo "[monitor] REST API クエリ: conn_count=${conn_count}"
+        ;;
+
+        *)
+        echo "[monitor] 警告: 未知の MONITOR_METHOD=${_method}。無人状態とみなします。"
+        conn_count=0
+        ;;
+
+    esac
 
     # =========================================================================
     # 無人判定とアイドルカウンタの管理
     # =========================================================================
-    if [ "${conn_count}" -gt 0 ] 2>/dev/null; then
+    if [ "${conn_count}" = "-1" ]; then
+        # REST API 認証エラー等 → プレイヤー数不明。カウンタ変更なし
+        echo "[monitor] 警告: プレイヤー数が不明（REST API 認証エラー？ADMIN_PASSWORD を確認）。アイドルカウンタを変更しません。"
+
+    elif [ "${conn_count}" -gt 0 ] 2>/dev/null; then
         # 接続あり → アイドルカウンタをリセット
         if [ "${idle_seconds}" -gt 0 ]; then
             echo "[monitor] プレイヤーを検知。アイドルカウンタをリセット（接続数: ${conn_count}）"

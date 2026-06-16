@@ -119,6 +119,7 @@ variable "monitor_protocol" {
     tcp: ss コマンドで ESTABLISHED 接続数をカウント（精度高）
     udp: UDP は接続の概念がなく ss では正確にカウントできないため暫定措置。
          Steam ベースのゲームには A2S_INFO クエリ実装を推奨（scripts/auto_shutdown.sh 参照）
+    monitor_method を設定した場合はそちらが優先される。
   EOT
   type        = string
   default     = "tcp"
@@ -126,6 +127,34 @@ variable "monitor_protocol" {
   validation {
     condition     = contains(["tcp", "udp"], var.monitor_protocol)
     error_message = "monitor_protocol は 'tcp' または 'udp' を指定してください。"
+  }
+}
+
+variable "monitor_method" {
+  description = <<-EOT
+    無人検知の方式（monitor_protocol より優先）。
+    tcp:  ss コマンドで TCP ESTABLISHED 接続数をカウント
+    a2s:  Steam A2S_INFO クエリでプレイヤー数を取得（Steam ゲーム汎用）
+    rest: REST API GET /v1/api/players でプレイヤー数を取得（Palworld 推奨）
+    空文字 / 未設定の場合は monitor_protocol から自動判定（後方互換）
+  EOT
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = contains(["", "tcp", "a2s", "rest"], var.monitor_method)
+    error_message = "monitor_method は tcp / a2s / rest のいずれか（または空文字）を指定してください。"
+  }
+}
+
+variable "rest_api_port" {
+  description = "REST API 方式（monitor_method=rest）で問い合わせるポート番号。Palworld デフォルトは 8212。"
+  type        = number
+  default     = 8212
+
+  validation {
+    condition     = var.rest_api_port >= 1 && var.rest_api_port <= 65535
+    error_message = "rest_api_port は 1〜65535 の範囲で指定してください。"
   }
 }
 

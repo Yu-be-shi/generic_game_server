@@ -133,6 +133,9 @@ resource "aws_ecs_task_definition" "game" {
         { name = "AWS_REGION", value = var.aws_region },
         { name = "MONITOR_PORT", value = tostring(var.monitor_port) },
         { name = "MONITOR_PROTOCOL", value = var.monitor_protocol },
+        { name = "MONITOR_METHOD", value = var.monitor_method },
+        { name = "REST_API_PORT", value = tostring(var.rest_api_port) },
+        { name = "REST_API_PASSWORD", value = lookup(var.environment_variables, "ADMIN_PASSWORD", "") },
         { name = "IDLE_MINUTES", value = tostring(var.idle_timeout_minutes) },
         { name = "CHECK_INTERVAL", value = "60" },
         # 停止前バックアップ用（auto_shutdown.sh が参照する）
