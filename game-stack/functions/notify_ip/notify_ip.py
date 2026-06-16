@@ -60,7 +60,7 @@ def get_public_ip_from_event(event: dict) -> str | None:
 
     eni_id = None
     for attachment in attachments:
-        if attachment.get("type") != "ElasticNetworkInterface":
+        if attachment.get("type") not in ("ElasticNetworkInterface", "eni"):
             continue
         for detail in attachment.get("details", []):
             if detail.get("name") == "networkInterfaceId":
