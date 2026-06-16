@@ -54,11 +54,10 @@ def lambda_handler(event: dict, context) -> dict:
     sig_hex = headers.get("x-signature-ed25519", "")
     timestamp = headers.get("x-signature-timestamp", "")
 
-    if not ed25519.verify(
-        DISCORD_PUBLIC_KEY,
-        (timestamp + body_raw).encode("utf-8"),
-        sig_hex,
-    ):
+    msg = (timestamp + body_raw).encode("utf-8")
+    logger.info("DEBUG sig_hex=%s ts=%s body_len=%d msg_len=%d pk=%s",
+                sig_hex[:16], timestamp, len(body_raw), len(msg), DISCORD_PUBLIC_KEY[:16])
+    if not ed25519.verify(DISCORD_PUBLIC_KEY, msg, sig_hex):
         logger.warning("署名検証失敗")
         return {"statusCode": 401, "body": "Invalid request signature"}
 

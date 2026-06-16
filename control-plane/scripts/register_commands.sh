@@ -30,7 +30,7 @@ echo "App ID: ${DISCORD_APP_ID}"
 echo "============================================="
 
 # コマンド定義（4つ: /games /start /stop /status）
-read -r -d '' COMMANDS << 'EOF'
+COMMANDS=$(cat << 'EOF'
 [
   {
     "name": "games",
@@ -78,6 +78,7 @@ read -r -d '' COMMANDS << 'EOF'
   }
 ]
 EOF
+)
 
 # Discord API にコマンドを一括登録（PUT = 全置換）
 RESPONSE=$(curl -s -w "\n%{http_code}" \
