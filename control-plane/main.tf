@@ -135,18 +135,40 @@ resource "aws_lambda_function" "discord_control" {
 }
 
 # -----------------------------------------------------------
-# Lambda Function URL（API Gateway 不要・固定費ゼロ）
+# API Gateway HTTP API（固定費ゼロ・リクエスト従量課金）
 # -----------------------------------------------------------
-# authorization_type = "NONE" だが、index.py で Ed25519 署名を検証するため安全。
-# Discord 以外から呼ばれても署名検証で 401 を返す。
+# Lambda Function URL はアカウントレベルでパブリックアクセスがブロックされるため
+# API Gateway 経由で公開する。
+# index.py で Ed25519 署名を検証するため Discord 以外の呼び出しは 401 で弾かれる。
 
-resource "aws_lambda_function_url" "discord_control" {
-  function_name      = aws_lambda_function.discord_control.function_name
-  authorization_type = "NONE"
+resource "aws_apigatewayv2_api" "discord_control" {
+  name          = local.function_name
+  protocol_type = "HTTP"
+}
 
-  cors {
-    allow_origins = ["https://discord.com"]
-    allow_methods = ["POST"]
-    max_age       = 300
-  }
+resource "aws_apigatewayv2_integration" "discord_control" {
+  api_id                 = aws_apigatewayv2_api.discord_control.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = aws_lambda_function.discord_control.invoke_arn
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_route" "discord_control" {
+  api_id    = aws_apigatewayv2_api.discord_control.id
+  route_key = "POST /"
+  target    = "integrations/${aws_apigatewayv2_integration.discord_control.id}"
+}
+
+resource "aws_apigatewayv2_stage" "discord_control" {
+  api_id      = aws_apigatewayv2_api.discord_control.id
+  name        = "$default"
+  auto_deploy = true
+}
+
+resource "aws_lambda_permission" "discord_control_apigw" {
+  statement_id  = "AllowAPIGatewayInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.discord_control.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.discord_control.execution_arn}/*/*"
 }

@@ -7,9 +7,9 @@ output "tf_state_bucket_name" {
   value       = aws_s3_bucket.tf_state.id
 }
 
-output "function_url" {
+output "interactions_endpoint_url" {
   description = "Discord Developer Portal の「Interactions Endpoint URL」に設定する URL。apply 直後にここに表示される。"
-  value       = aws_lambda_function_url.discord_control.function_url
+  value       = aws_apigatewayv2_stage.discord_control.invoke_url
 }
 
 output "lambda_function_name" {
@@ -31,7 +31,7 @@ output "next_steps" {
     2. アプリを選択 → General Information 画面を開く
 
     3. "INTERACTIONS ENDPOINT URL" に以下を貼り付けて保存:
-       ${aws_lambda_function_url.discord_control.function_url}
+       ${aws_apigatewayv2_stage.discord_control.invoke_url}
        （保存できれば署名検証成功）
 
     4. スラッシュコマンドを登録（1回だけ実行）:
