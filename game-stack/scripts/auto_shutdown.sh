@@ -122,9 +122,9 @@ while true; do
         #     プレイヤーが切断して放置している危険なケースでは A2S は必ず 0 を返す。
         # ----------------------------------------------------------------
         conn_count=$(python3 - <<'PYEOF' 2>/dev/null
-import socket, struct, sys
+import os, socket, struct, sys
 
-PORT = int("${MONITOR_PORT}")
+PORT = int(os.environ["MONITOR_PORT"])
 TIMEOUT = 5
 
 def query_players(host, port):
@@ -145,8 +145,8 @@ def query_players(host, port):
 
         # --- Step 2: A2S_INFO レスポンスをパース（0x49 = 'I'）---
         if len(data) < 6 or data[4:5] != b'\x49':
-            # 期待しないレスポンス → 稼働中扱い
-            print(1)
+            # 期待しないレスポンス → 0人扱い（アイドルカウント対象）
+            print(0)
             return
 
         # ヘッダ 4B + type 1B + protocol 1B = offset 6 からサーバー名（null終端）開始
@@ -163,24 +163,24 @@ def query_players(host, port):
         if pos < len(data):
             print(data[pos])
         else:
-            print(1)  # パース失敗 → 稼働中扱い
+            print(0)  # パース失敗 → 0人扱い
 
     except (socket.timeout, OSError):
-        # タイムアウト / 接続不可 → サーバー起動中の可能性あり。停止しない
-        print(1)
+        # タイムアウト / 無応答 → A2S 未対応またはまだ起動中。0人扱いでアイドルカウント
+        sys.exit(1)
     except Exception:
-        print(1)
+        sys.exit(1)
     finally:
         s.close()
 
 query_players("127.0.0.1", PORT)
 PYEOF
-)
-        # python3 コマンド自体が失敗した場合のフォールバック
+) || conn_count=0
+        # python3 が非ゼロ終了した場合（タイムアウト含む）は 0 人扱い
         if ! echo "${conn_count}" | grep -qE '^[0-9]+$'; then
-            echo "[monitor] 警告: A2S クエリの実行に失敗しました。稼働中として扱います。"
-            conn_count=1
+            conn_count=0
         fi
+        echo "[monitor] A2S クエリ: conn_count=${conn_count}"
     fi
 
     # =========================================================================
