@@ -18,6 +18,7 @@ import base64
 import json
 import logging
 import os
+import socket
 
 import boto3
 import ed25519
@@ -198,10 +199,28 @@ def _cmd_status(game_name: str) -> dict:
             f"🟡 **{game_name}** は起動処理中です。しばらくお待ちください。"
         )
 
-    # 実行中タスクのパブリック IP を取得
-    public_ip = _get_running_task_ip(cluster_arn)
+    # 実行中タスクのパブリック IP とタスク定義 ARN を取得
+    public_ip, task_def_arn = _get_running_task_info(cluster_arn)
     ip_str = f"`{public_ip}`" if public_ip else "取得中..."
 
+    # A2S クエリでゲームサーバーの実起動状態を確認（UDP 監視ゲームのみ）
+    if public_ip and task_def_arn:
+        monitor_port, monitor_protocol = _get_monitor_port_protocol(task_def_arn)
+        if monitor_protocol == "udp" and monitor_port:
+            players = _query_a2s(public_ip, monitor_port)
+            logger.info("A2S クエリ結果: host=%s port=%d players=%s", public_ip, monitor_port, players)
+            if players is not None:
+                return _ephemeral(
+                    f"🟢 **{game_name}** 稼働中（プレイヤー接続可能）\n"
+                    f"IP アドレス: {ip_str}"
+                )
+            else:
+                return _ephemeral(
+                    f"🟡 **{game_name}** 起動処理中\n"
+                    f"ECSタスクは起動済み。サーバー初期化中です…（1〜数分かかります）"
+                )
+
+    # UDP 監視でない / ポート不明の場合はフォールバック
     return _ephemeral(
         f"🟢 **{game_name}** 稼働中\n"
         f"IP アドレス: {ip_str}"
@@ -299,20 +318,26 @@ def _describe_service(cluster_arn: str, service_arn: str) -> dict | None:
         return None
 
 
-def _get_running_task_ip(cluster_arn: str) -> str | None:
-    """実行中タスクのパブリック IP を返す。なければ None。"""
+def _get_running_task_info(cluster_arn: str) -> tuple[str | None, str | None]:
+    """
+    実行中タスクのパブリック IP とタスク定義 ARN を返す。
+    どちらかを取得できない場合は対応する要素を None にして返す。
+    """
     try:
         task_arns = ecs.list_tasks(cluster=cluster_arn, desiredStatus="RUNNING")["taskArns"]
         if not task_arns:
-            return None
+            return None, None
 
         tasks = ecs.describe_tasks(cluster=cluster_arn, tasks=task_arns[:1])["tasks"]
         if not tasks:
-            return None
+            return None, None
+
+        task = tasks[0]
+        task_def_arn = task.get("taskDefinitionArn")
 
         # attachments から ENI ID を探す
         eni_id = None
-        for attachment in tasks[0].get("attachments", []):
+        for attachment in task.get("attachments", []):
             if attachment.get("type") != "ElasticNetworkInterface":
                 continue
             for detail in attachment.get("details", []):
@@ -321,16 +346,93 @@ def _get_running_task_ip(cluster_arn: str) -> str | None:
                     break
 
         if not eni_id:
-            return None
+            return None, task_def_arn
 
         interfaces = ec2.describe_network_interfaces(NetworkInterfaceIds=[eni_id])["NetworkInterfaces"]
         if not interfaces:
-            return None
+            return None, task_def_arn
 
-        return interfaces[0].get("Association", {}).get("PublicIp")
+        public_ip = interfaces[0].get("Association", {}).get("PublicIp")
+        return public_ip, task_def_arn
 
     except Exception:
-        logger.exception("IP 取得失敗")
+        logger.exception("タスク情報取得失敗")
+        return None, None
+
+
+def _get_running_task_ip(cluster_arn: str) -> str | None:
+    """実行中タスクのパブリック IP を返す。なければ None。（後方互換ラッパー）"""
+    public_ip, _ = _get_running_task_info(cluster_arn)
+    return public_ip
+
+
+def _get_monitor_port_protocol(task_def_arn: str) -> tuple[int | None, str]:
+    """
+    タスク定義から monitor コンテナの MONITOR_PORT と MONITOR_PROTOCOL を返す。
+    見つからない場合は (None, "tcp") を返す。
+    """
+    try:
+        td = ecs.describe_task_definition(taskDefinition=task_def_arn)
+        container_defs = td.get("taskDefinition", {}).get("containerDefinitions", [])
+        for container in container_defs:
+            env = {e["name"]: e["value"] for e in container.get("environment", [])}
+            if "MONITOR_PORT" in env:
+                port = int(env["MONITOR_PORT"])
+                protocol = env.get("MONITOR_PROTOCOL", "tcp").lower()
+                logger.info("monitor コンテナ env 取得: port=%d protocol=%s", port, protocol)
+                return port, protocol
+    except Exception:
+        logger.exception("タスク定義取得失敗: %s", task_def_arn)
+    return None, "tcp"
+
+
+def _query_a2s(host: str, port: int, timeout: float = 1.5) -> int | None:
+    """
+    Steam A2S_INFO クエリでプレイヤー数を返す。
+    無応答 / 到達不可 / パースエラー の場合は None を返す（サーバーまだ起動中）。
+
+    auto_shutdown.sh の A2S 実装を移植。Discord の 3 秒応答制限に合わせ
+    タイムアウトを 1.5 秒に設定している。
+    """
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(timeout)
+        try:
+            # Step 1: A2S_INFO リクエスト送信
+            req = b'\xFF\xFF\xFF\xFFTSource Engine Query\x00'
+            s.sendto(req, (host, port))
+            data, _ = s.recvfrom(1400)
+
+            # チャレンジ応答（0x41 = 'A'）が返ってきた場合は再送
+            if len(data) >= 9 and data[4:5] == b'\x41':
+                challenge = data[5:9]
+                req2 = b'\xFF\xFF\xFF\xFFTSource Engine Query\x00' + challenge
+                s.sendto(req2, (host, port))
+                data, _ = s.recvfrom(1400)
+
+            # Step 2: A2S_INFO レスポンスをパース（0x49 = 'I'）
+            if len(data) < 6 or data[4:5] != b'\x49':
+                return None
+
+            # ヘッダ 4B + type 1B + protocol 1B = offset 6 からサーバー名（null終端）開始
+            pos = 6
+            # null 終端文字列を 4 つスキップ: name, map, folder, game
+            for _ in range(4):
+                end = data.index(b'\x00', pos)
+                pos = end + 1
+
+            # AppID (2B little endian) をスキップ
+            pos += 2
+
+            # players バイト（現在のプレイヤー数）
+            if pos < len(data):
+                return data[pos]
+            return None
+
+        finally:
+            s.close()
+    except Exception:
+        logger.debug("A2S クエリ失敗 %s:%d", host, port, exc_info=True)
         return None
 
 

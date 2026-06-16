@@ -30,6 +30,16 @@ def lambda_handler(event, context):
     """Lambda エントリーポイント"""
     logger.info("受信イベント: %s", json.dumps(event, ensure_ascii=False))
 
+    # STOPPED イベントの場合は停止通知を送信して終了
+    detail = event.get("detail", {})
+    if detail.get("lastStatus") == "STOPPED":
+        try:
+            send_discord_message(f"⚫ **{GAME_NAME}** サーバーが停止しました。")
+            logger.info("Discord 停止通知送信完了")
+        except Exception:
+            logger.exception("停止通知の送信に失敗しました")
+        return
+
     try:
         public_ip = get_public_ip_from_event(event)
         if public_ip is None:

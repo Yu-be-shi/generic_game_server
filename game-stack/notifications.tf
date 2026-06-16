@@ -122,6 +122,42 @@ resource "aws_lambda_permission" "allow_eventbridge" {
   source_arn    = aws_cloudwatch_event_rule.ecs_running.arn
 }
 
+# EventBridge ルール（ECS タスクが STOPPED になった時に発火）
+# desiredStatus=STOPPED でフィルタすることで、タスク置換/クラッシュ再起動時の
+# 誤「停止」通知を防ぐ。/stop コマンドとアイドル自動停止の両方を捕捉する。
+resource "aws_cloudwatch_event_rule" "ecs_stopped" {
+  name        = "${local.name_prefix}-ecs-stopped"
+  description = "${var.game_name} ECS task STOPPED state change - trigger stop notification"
+
+  event_pattern = jsonencode({
+    source        = ["aws.ecs"]
+    "detail-type" = ["ECS Task State Change"]
+    detail = {
+      lastStatus    = ["STOPPED"]
+      desiredStatus = ["STOPPED"]
+      clusterArn    = [aws_ecs_cluster.game.arn]
+    }
+  })
+
+  tags = {
+    Name = "${local.name_prefix}-ecs-stopped"
+  }
+}
+
+resource "aws_cloudwatch_event_target" "notify_stopped" {
+  rule      = aws_cloudwatch_event_rule.ecs_stopped.name
+  target_id = "NotifyStoppedLambda"
+  arn       = aws_lambda_function.notify_ip.arn
+}
+
+resource "aws_lambda_permission" "allow_eventbridge_stopped" {
+  statement_id  = "AllowExecutionFromEventBridgeStopped"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.notify_ip.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.ecs_stopped.arn
+}
+
 # ============================================================
 # ② 月間コスト超過段階通知（Budgets → SNS → Lambda → Discord）
 # ============================================================

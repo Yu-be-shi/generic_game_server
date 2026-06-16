@@ -68,7 +68,8 @@ resource "aws_iam_role_policy" "discord_control" {
           "ecs:ListServices",
           "ecs:DescribeServices",
           "ecs:ListTasks",
-          "ecs:DescribeTasks"
+          "ecs:DescribeTasks",
+          "ecs:DescribeTaskDefinition"
         ]
         Resource = "*"
       },
