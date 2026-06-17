@@ -95,6 +95,18 @@ resource "aws_iam_role_policy" "discord_control" {
         Effect   = "Allow"
         Action   = ["ssm:GetParameter"]
         Resource = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/ggs/*"
+      },
+      {
+        # /start で update_service に taskDefinition を指定する際、ECS が
+        # タスクの execution/task ロールを service に渡すために必要。
+        # ecs-tasks.amazonaws.com へのパスのみに限定することでゲーム追加時の再デプロイも不要。
+        Sid      = "PassEcsTaskRoles"
+        Effect   = "Allow"
+        Action   = ["iam:PassRole"]
+        Resource = "*"
+        Condition = {
+          StringEquals = { "iam:PassedToService" = "ecs-tasks.amazonaws.com" }
+        }
       }
     ]
   })
