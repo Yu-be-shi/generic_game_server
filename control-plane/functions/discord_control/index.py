@@ -162,7 +162,24 @@ def _cmd_start(game_name: str) -> dict:
             f"`/status game:{game_name}` で IP を確認できます。"
         )
 
-    ecs.update_service(cluster=cluster_arn, service=service_arn, desiredCount=1)
+    # 常に最新タスク定義で起動する。
+    # ecs.tf の ignore_changes=[task_definition] により terraform apply しても
+    # サービスが参照するリビジョンは更新されないため、起動時に明示的に指定する。
+    # 失敗した場合はタスク定義を指定せず従来通りサービス参照中のリビジョンで起動する。
+    latest_task_def_arn = None
+    if svc:
+        current_task_def_arn = svc.get("taskDefinition", "")
+        # ARN からファミリー名（例: "palworld-palworld"）を抽出して最新リビジョンを取得
+        family = current_task_def_arn.split("/")[-1].split(":")[0] if current_task_def_arn else ""
+        if family:
+            latest_task_def_arn = _get_latest_task_def_arn(family)
+
+    update_kwargs: dict = {"cluster": cluster_arn, "service": service_arn, "desiredCount": 1}
+    if latest_task_def_arn:
+        update_kwargs["taskDefinition"] = latest_task_def_arn
+        logger.info("最新タスク定義を指定して起動: %s", latest_task_def_arn)
+
+    ecs.update_service(**update_kwargs)
     return _ephemeral(
         f"✅ **{game_name}** の起動を開始しました！\n"
         f"接続可能になったら IP が通知されます 📨"
@@ -323,6 +340,21 @@ def _describe_service(cluster_arn: str, service_arn: str) -> dict | None:
         return services[0] if services else None
     except Exception:
         logger.exception("describe_services 失敗")
+        return None
+
+
+def _get_latest_task_def_arn(family: str) -> str | None:
+    """
+    タスク定義ファミリーの最新 ACTIVE リビジョン ARN を返す。
+    取得に失敗した場合は None を返す（呼び出し元がフォールバック処理を行う）。
+    """
+    try:
+        result = ecs.describe_task_definition(taskDefinition=family)
+        arn = result.get("taskDefinition", {}).get("taskDefinitionArn")
+        logger.info("最新タスク定義 ARN 取得: family=%s arn=%s", family, arn)
+        return arn
+    except Exception:
+        logger.exception("最新タスク定義 ARN の取得に失敗: family=%s", family)
         return None
 
 
