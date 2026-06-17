@@ -29,7 +29,7 @@ echo "Discord スラッシュコマンド登録"
 echo "App ID: ${DISCORD_APP_ID}"
 echo "============================================="
 
-# コマンド定義（4つ: /games /start /stop /status）
+# コマンド定義（6つ: /games /start /stop /status /cost /update）
 COMMANDS=$(cat << 'EOF'
 [
   {
@@ -44,9 +44,10 @@ COMMANDS=$(cat << 'EOF'
     "options": [
       {
         "name": "game",
-        "description": "起動するゲーム名（例: palworld, minecraft）",
+        "description": "起動するゲーム名",
         "type": 3,
-        "required": true
+        "required": true,
+        "autocomplete": true
       }
     ]
   },
@@ -59,7 +60,8 @@ COMMANDS=$(cat << 'EOF'
         "name": "game",
         "description": "停止するゲーム名",
         "type": 3,
-        "required": true
+        "required": true,
+        "autocomplete": true
       }
     ]
   },
@@ -72,7 +74,27 @@ COMMANDS=$(cat << 'EOF'
         "name": "game",
         "description": "確認するゲーム名",
         "type": 3,
-        "required": true
+        "required": true,
+        "autocomplete": true
+      }
+    ]
+  },
+  {
+    "name": "cost",
+    "description": "今月の AWS コスト・予算残・月末着地予測を表示します",
+    "type": 1
+  },
+  {
+    "name": "update",
+    "description": "サーバーを停止したままサーバー本体をアップデートします（UPDATE_ON_BOOT）",
+    "type": 1,
+    "options": [
+      {
+        "name": "game",
+        "description": "アップデートするゲーム名",
+        "type": 3,
+        "required": true,
+        "autocomplete": true
       }
     ]
   }

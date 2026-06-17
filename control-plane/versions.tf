@@ -28,4 +28,14 @@ terraform {
 
 provider "aws" {
   region = var.aws_region
+
+  # 全リソースに GameOps 識別タグを自動付与（個人アカウントでの分離・コスト追跡用）
+  # Cost Explorer で Project=GameOps フィルタを使うには AWS Billing コンソールで
+  # "Project" をコスト配分タグとして有効化すること。
+  default_tags {
+    tags = {
+      Project   = "GameOps"
+      ManagedBy = "Terraform"
+    }
+  }
 }

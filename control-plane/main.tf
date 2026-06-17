@@ -116,6 +116,28 @@ resource "aws_iam_role_policy" "discord_control" {
         Effect   = "Allow"
         Action   = ["ssm:PutParameter"]
         Resource = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/ggs/*"
+      },
+      {
+        # /cost コマンド: 今月合計・月末予測・予算残を表示
+        # ce / budgets はグローバルサービスのため Resource は * 必須
+        # sts:GetCallerIdentity は IAM ポリシー不要（常に許可）
+        Sid    = "CostRead"
+        Effect = "Allow"
+        Action = [
+          "ce:GetCostAndUsage",
+          "ce:GetCostForecast",
+          "budgets:ViewBudget",
+          "budgets:DescribeBudgets"
+        ]
+        Resource = "*"
+      },
+      {
+        # /update コマンド: game-stack の auto_update Worker Lambda を非同期 invoke する
+        # ゲーム追加時の再デプロイを避けるためワイルドカード（*-auto-update）で全ゲームを対象にする
+        Sid      = "InvokeAutoUpdate"
+        Effect   = "Allow"
+        Action   = ["lambda:InvokeFunction"]
+        Resource = "arn:aws:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:function:*-auto-update"
       }
     ]
   })
@@ -154,6 +176,9 @@ resource "aws_lambda_function" "discord_control" {
       DISCORD_PUBLIC_KEY       = var.discord_public_key
       GAME_AWS_REGION          = var.aws_region
       DISCORD_ALLOWED_USER_IDS = join(",", var.discord_allowed_user_ids)
+      # ツール非依存化: MESSAGING_PROVIDER で provider.py の実装を選択する
+      # "discord"（既定）の場合は DISCORD_PUBLIC_KEY を使用し挙動変化なし
+      MESSAGING_PROVIDER = "discord"
     }
   }
 
