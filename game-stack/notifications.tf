@@ -51,6 +51,23 @@ resource "aws_iam_role_policy" "notify_ip" {
         Effect   = "Allow"
         Action   = ["ec2:DescribeNetworkInterfaces"]
         Resource = "*"
+      },
+      {
+        # 実行中タスクのパブリック IP 取得（SSM イベント受信時）
+        Sid    = "EcsDescribeTasks"
+        Effect = "Allow"
+        Action = [
+          "ecs:ListTasks",
+          "ecs:DescribeTasks"
+        ]
+        Resource = "*"
+      },
+      {
+        # SSM ready パラメータの現在値を確認（EventBridge は値を含まないため）
+        Sid      = "SsmGetReady"
+        Effect   = "Allow"
+        Action   = ["ssm:GetParameter"]
+        Resource = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/ggs/${local.name_prefix}/ready"
       }
     ]
   })
@@ -78,6 +95,8 @@ resource "aws_lambda_function" "notify_ip" {
     variables = {
       DISCORD_WEBHOOK_URL = var.discord_webhook_url
       GAME_NAME           = var.game_name
+      CLUSTER_ARN         = aws_ecs_cluster.game.arn
+      READY_PARAM         = "/ggs/${local.name_prefix}/ready"
     }
   }
 
@@ -88,38 +107,38 @@ resource "aws_lambda_function" "notify_ip" {
   }
 }
 
-# EventBridge ルール（ECS タスクが RUNNING になった時に発火）
-resource "aws_cloudwatch_event_rule" "ecs_running" {
-  name        = "${local.name_prefix}-ecs-running"
-  description = "${var.game_name} ECS task RUNNING state change - trigger IP notification"
+# EventBridge ルール（monitor サイドカーが SSM の /ready パラメータを "1" にした時に発火）
+# ECS RUNNING（コンテナ起動）ではなく、ゲームが実際に接続受付を開始したタイミングで通知する
+resource "aws_cloudwatch_event_rule" "server_ready" {
+  name        = "${local.name_prefix}-server-ready"
+  description = "${var.game_name} server ready - trigger IP notification when game accepts connections"
 
   event_pattern = jsonencode({
-    source        = ["aws.ecs"]
-    "detail-type" = ["ECS Task State Change"]
+    source        = ["aws.ssm"]
+    "detail-type" = ["Parameter Store Change"]
     detail = {
-      lastStatus    = ["RUNNING"]
-      desiredStatus = ["RUNNING"]
-      clusterArn    = [aws_ecs_cluster.game.arn]
+      name      = ["/ggs/${local.name_prefix}/ready"]
+      operation = ["Create", "Update"]
     }
   })
 
   tags = {
-    Name = "${local.name_prefix}-ecs-running"
+    Name = "${local.name_prefix}-server-ready"
   }
 }
 
-resource "aws_cloudwatch_event_target" "notify_ip" {
-  rule      = aws_cloudwatch_event_rule.ecs_running.name
+resource "aws_cloudwatch_event_target" "server_ready" {
+  rule      = aws_cloudwatch_event_rule.server_ready.name
   target_id = "NotifyIpLambda"
   arn       = aws_lambda_function.notify_ip.arn
 }
 
-resource "aws_lambda_permission" "allow_eventbridge" {
-  statement_id  = "AllowExecutionFromEventBridge"
+resource "aws_lambda_permission" "allow_eventbridge_server_ready" {
+  statement_id  = "AllowExecutionFromEventBridgeServerReady"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.notify_ip.function_name
   principal     = "events.amazonaws.com"
-  source_arn    = aws_cloudwatch_event_rule.ecs_running.arn
+  source_arn    = aws_cloudwatch_event_rule.server_ready.arn
 }
 
 # EventBridge ルール（ECS タスクが STOPPED になった時に発火）

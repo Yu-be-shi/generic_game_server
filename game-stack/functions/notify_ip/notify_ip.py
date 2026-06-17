@@ -1,11 +1,15 @@
 """
-notify_ip.py - ECS タスク起動時にパブリック IP を Discord に通知する Lambda 関数
+notify_ip.py - ゲームサーバー起動時にパブリック IP を Discord に通知する Lambda 関数
 
-トリガー: Amazon EventBridge（ECS Task State Change → lastStatus=RUNNING）
-処理:
-  1. イベントから ECS タスクに紐づく ENI (ElasticNetworkInterface) の ID を取得
-  2. EC2 API で ENI のパブリック IP を取得
-  3. Discord Webhook に「サーバーが起動しました。IP: XX.XX.XX.XX」を POST
+トリガー:
+  [起動通知] Amazon EventBridge（SSM Parameter Store Change）
+             → monitor サイドカーが /ready パラメータを "1" にした時
+  [停止通知] Amazon EventBridge（ECS Task State Change → lastStatus=STOPPED）
+
+処理（起動通知）:
+  1. SSM パラメータの値を取得し "1" であることを確認（EventBridge は値を含まないため）
+  2. ECS の実行中タスクから ENI のパブリック IP を取得
+  3. Discord Webhook に「サーバーが接続可能になりました。IP: XX.XX.XX.XX」を POST
 
 依存ライブラリ: boto3（Lambda ランタイムに標準搭載）、urllib（標準ライブラリ）のみ
 """
@@ -24,83 +28,124 @@ logger.setLevel(logging.INFO)
 # 環境変数（Terraform の lambda.tf から注入）
 DISCORD_WEBHOOK_URL = os.environ["DISCORD_WEBHOOK_URL"]
 GAME_NAME = os.environ["GAME_NAME"]
+CLUSTER_ARN = os.environ.get("CLUSTER_ARN", "")
+READY_PARAM = os.environ.get("READY_PARAM", "")
+
+AWS_REGION = os.environ.get("AWS_REGION", "ap-northeast-1")
+
+ec2 = boto3.client("ec2", region_name=AWS_REGION)
+ecs = boto3.client("ecs", region_name=AWS_REGION)
+ssm = boto3.client("ssm", region_name=AWS_REGION)
 
 
 def lambda_handler(event, context):
     """Lambda エントリーポイント"""
     logger.info("受信イベント: %s", json.dumps(event, ensure_ascii=False))
 
-    # STOPPED イベントの場合は停止通知を送信して終了
+    source = event.get("source", "")
     detail = event.get("detail", {})
-    if detail.get("lastStatus") == "STOPPED":
+
+    # --- ECS タスク停止イベント → 停止通知 ---
+    if source == "aws.ecs" and detail.get("lastStatus") == "STOPPED":
         try:
-            send_discord_message(f"⚫ **{GAME_NAME}** サーバーが完全に停止しました（ECSタスク終了）。課金は発生しません。")
+            send_discord_message(
+                f"⚫ **{GAME_NAME}** サーバーが完全に停止しました（ECSタスク終了）。課金は発生しません。"
+            )
             logger.info("Discord 停止通知送信完了")
         except Exception:
             logger.exception("停止通知の送信に失敗しました")
         return
 
-    try:
-        public_ip = get_public_ip_from_event(event)
+    # --- SSM パラメータ変更イベント → 起動完了通知 ---
+    if source == "aws.ssm":
+        param_name = detail.get("name", "")
+        logger.info("SSM 変更イベント: param=%s operation=%s", param_name, detail.get("operation"))
+
+        # EventBridge は変更後の値を含まないため SSM API で取得する
+        try:
+            resp = ssm.get_parameter(Name=param_name)
+            value = resp["Parameter"]["Value"]
+        except Exception:
+            logger.exception("SSM パラメータ取得失敗: %s", param_name)
+            return
+
+        if value != "1":
+            # ready=0 の書き込み（タスク起動時の初期化）はスキップ
+            logger.info("ready の値が '1' でないためスキップ: value=%s", value)
+            return
+
+        # 実行中タスクのパブリック IP を取得
+        public_ip = get_public_ip_from_running_task()
         if public_ip is None:
             logger.warning("パブリック IP を取得できませんでした。通知をスキップします。")
             return
 
-        message = f"🟢 **{GAME_NAME}** サーバーが起動しました！\nIP アドレス: `{public_ip}`"
-        send_discord_message(message)
-        logger.info("Discord 通知送信完了: IP=%s", public_ip)
+        message = (
+            f"🟢 **{GAME_NAME}** サーバーが接続可能になりました！\n"
+            f"IP アドレス: `{public_ip}`"
+        )
+        try:
+            send_discord_message(message)
+            logger.info("Discord 起動通知送信完了: IP=%s", public_ip)
+        except Exception:
+            logger.exception("Discord 通知中にエラーが発生しました")
+        return
+
+    logger.warning("未知のイベント source=%s", source)
+
+
+def get_public_ip_from_running_task() -> str | None:
+    """
+    ECS 実行中タスクのパブリック IP を ENI 経由で取得する。
+    CLUSTER_ARN 環境変数で対象クラスターを指定する。
+    """
+    if not CLUSTER_ARN:
+        logger.error("CLUSTER_ARN が設定されていません")
+        return None
+
+    try:
+        task_arns = ecs.list_tasks(cluster=CLUSTER_ARN, desiredStatus="RUNNING")["taskArns"]
+        if not task_arns:
+            logger.warning("実行中タスクが見つかりません: cluster=%s", CLUSTER_ARN)
+            return None
+
+        tasks = ecs.describe_tasks(cluster=CLUSTER_ARN, tasks=task_arns[:1])["tasks"]
+        if not tasks:
+            return None
+
+        task = tasks[0]
+
+        # attachments から ENI ID を探す
+        eni_id = None
+        for attachment in task.get("attachments", []):
+            if attachment.get("type") not in ("ElasticNetworkInterface", "eni"):
+                continue
+            for detail in attachment.get("details", []):
+                if detail.get("name") == "networkInterfaceId":
+                    eni_id = detail.get("value")
+                    break
+            if eni_id:
+                break
+
+        if not eni_id:
+            logger.warning("ENI ID が見つかりません。attachments: %s", json.dumps(task.get("attachments", [])))
+            return None
+
+        logger.info("ENI ID: %s", eni_id)
+
+        interfaces = ec2.describe_network_interfaces(NetworkInterfaceIds=[eni_id])["NetworkInterfaces"]
+        if not interfaces:
+            logger.warning("ENI %s が見つかりません", eni_id)
+            return None
+
+        public_ip = interfaces[0].get("Association", {}).get("PublicIp")
+        if not public_ip:
+            logger.warning("パブリック IP が見つかりません。ENI: %s", eni_id)
+        return public_ip
 
     except Exception:
-        # 通知の失敗はログに記録するが、Lambda はエラーで落とさない
-        # （ゲームサーバーの起動には影響しない）
-        logger.exception("Discord 通知中にエラーが発生しました")
-
-
-def get_public_ip_from_event(event: dict) -> str | None:
-    """
-    EventBridge の ECS Task State Change イベントから ENI ID を取得し、
-    EC2 API でパブリック IP を引く。
-
-    イベント構造（抜粋）:
-      event.detail.attachments[].type == "ElasticNetworkInterface"
-        .details[].name == "networkInterfaceId"
-        .details[].value == "eni-xxxxxxxx"
-    """
-    attachments = event.get("detail", {}).get("attachments", [])
-
-    eni_id = None
-    for attachment in attachments:
-        if attachment.get("type") not in ("ElasticNetworkInterface", "eni"):
-            continue
-        for detail in attachment.get("details", []):
-            if detail.get("name") == "networkInterfaceId":
-                eni_id = detail.get("value")
-                break
-        if eni_id:
-            break
-
-    if not eni_id:
-        logger.warning("ENI ID が見つかりませんでした。attachments: %s", json.dumps(attachments))
+        logger.exception("タスク情報取得失敗")
         return None
-
-    logger.info("ENI ID: %s", eni_id)
-
-    # ENI からパブリック IP を取得
-    ec2 = boto3.client("ec2")
-    response = ec2.describe_network_interfaces(NetworkInterfaceIds=[eni_id])
-    interfaces = response.get("NetworkInterfaces", [])
-
-    if not interfaces:
-        logger.warning("ENI %s が見つかりません", eni_id)
-        return None
-
-    association = interfaces[0].get("Association", {})
-    public_ip = association.get("PublicIp")
-
-    if not public_ip:
-        logger.warning("パブリック IP が見つかりません。ENI: %s, Association: %s", eni_id, association)
-
-    return public_ip
 
 
 def send_discord_message(content: str) -> None:

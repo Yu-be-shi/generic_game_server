@@ -100,6 +100,14 @@ resource "aws_iam_role_policy" "task_permissions" {
           aws_s3_bucket.backup.arn,
           "${aws_s3_bucket.backup.arn}/*"
         ]
+      },
+      {
+        # SSM ステータス書き込み用（auto_shutdown.sh が ready/players を書き込む）
+        # /status コマンドと IP 通知 Lambda がこれを読んでゲームの受付状態を判定する
+        Sid    = "SsmStatusPublish"
+        Effect = "Allow"
+        Action = ["ssm:PutParameter"]
+        Resource = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/ggs/${local.name_prefix}/*"
       }
     ]
   })

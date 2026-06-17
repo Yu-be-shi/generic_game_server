@@ -87,6 +87,14 @@ resource "aws_iam_role_policy" "discord_control" {
         Effect   = "Allow"
         Action   = ["ec2:DescribeNetworkInterfaces"]
         Resource = "*"
+      },
+      {
+        # SSM からゲームサーバーの受付状態・プレイヤー数を読み取る（/status）
+        # monitor サイドカーが /ggs/<prefix>/ready と /ggs/<prefix>/players に書き込む
+        Sid      = "SsmStatusRead"
+        Effect   = "Allow"
+        Action   = ["ssm:GetParameter"]
+        Resource = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/ggs/*"
       }
     ]
   })

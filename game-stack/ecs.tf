@@ -32,6 +32,9 @@ resource "aws_ecs_cluster" "game" {
     Name = local.cluster_name
     # Game タグ: control-plane の Discord ボットがこのタグでゲームを発見する
     Game = var.game_name
+    # StatusParamPrefix タグ: /status コマンドが SSM パラメータを読む際のプレフィックス
+    # monitor サイドカーが "/ggs/${local.name_prefix}/ready" 等に書き込む
+    StatusParamPrefix = "/ggs/${local.name_prefix}"
   }
 }
 
@@ -142,6 +145,9 @@ resource "aws_ecs_task_definition" "game" {
         { name = "BACKUP_BUCKET", value = aws_s3_bucket.backup.id },
         { name = "BACKUP_PREFIX", value = local.name_prefix },
         { name = "EFS_MOUNT_PATH", value = var.efs_mount_path },
+        # SSM ステータス連携（Discord 通知・/status コマンド用）
+        { name = "READY_PARAM", value = "/ggs/${local.name_prefix}/ready" },
+        { name = "PLAYERS_PARAM", value = "/ggs/${local.name_prefix}/players" },
       ]
 
       # セーブデータを読み取るために EFS をマウント（読み取り専用）
