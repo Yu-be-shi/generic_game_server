@@ -63,11 +63,11 @@ resource "aws_iam_role_policy" "notify_ip" {
         Resource = "*"
       },
       {
-        # SSM ready パラメータの現在値を確認（EventBridge は値を含まないため）
-        Sid      = "SsmGetReady"
-        Effect   = "Allow"
-        Action   = ["ssm:GetParameter"]
-        Resource = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/ggs/${local.name_prefix}/ready"
+        # SSM ready の現在値確認 + notified_task への通知済みタスク ARN 記録（重複排除）
+        Sid    = "SsmStatus"
+        Effect = "Allow"
+        Action = ["ssm:GetParameter", "ssm:PutParameter"]
+        Resource = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/ggs/${local.name_prefix}/*"
       }
     ]
   })

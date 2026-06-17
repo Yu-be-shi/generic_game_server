@@ -9,34 +9,37 @@
 #   ネットワーク名前空間を共有しているため、ゲームポートへの
 #   接続数を監視できる。
 #
-#   ゲームが受付を開始したことを検知したら SSM Parameter Store に
-#   ready=1 を書き込む（Discord 通知 Lambda がこれをトリガーに起動通知を送る）。
-#   プレイヤー数は毎ループ SSM の players パラメータへ書き込む（/status 用）。
+#   起動シーケンスは2段階：
 #
-#   プレイヤーの接続が ${IDLE_MINUTES} 分間ゼロの場合に「無人」と判断し、
-#   aws ecs update-service --desired-count 0 でタスクを自己停止させる。
-#   接続を検知したらアイドルカウンタをリセットし、監視を継続する。
+#   [フェーズA: 受付待ち]
+#     READY_POLL_INTERVAL（デフォルト10秒）間隔で readiness をチェックする。
+#     _ready=1 を検知したら即座に SSM ready=1 を書き込み（Discord IP 通知が飛ぶ）。
+#     STARTUP_GRACE_MINUTES（デフォルト30分）以内に受付開始しなければコスト保護
+#     のため自動停止する。
+#
+#   [フェーズB: アイドル監視]
+#     CHECK_INTERVAL（デフォルト60秒）間隔で接続数を監視する。
+#     プレイヤーの接続が IDLE_MINUTES 分間ゼロの場合に「無人」と判断し、
+#     aws ecs update-service --desired-count 0 でタスクを自己停止させる。
 #
 # 【important: essential=false について】
 #   このコンテナは essential=false で定義されているため、
 #   スクリプトがクラッシュしてもゲームコンテナは停止しない。
 #   安全サイドに倒した設計になっている。
 #
-# 【改変ポイント】
-#   - 無人判定ロジック（MONITOR_METHOD: tcp/a2s/rest）
-#   - CHECK_INTERVAL（デフォルト 60 秒）でチェック頻度を調整
-#
 # 【環境変数（Terraform から自動注入）】
-#   CLUSTER_NAME     - ECS クラスター名
-#   SERVICE_NAME     - ECS サービス名
-#   AWS_REGION       - AWS リージョン
-#   MONITOR_PORT     - 監視するポート番号
-#   MONITOR_PROTOCOL - "tcp" または "udp"
-#   MONITOR_METHOD   - "tcp", "a2s", "rest"（未設定時は MONITOR_PROTOCOL から推定）
-#   IDLE_MINUTES     - 無人タイムアウト（分）
-#   CHECK_INTERVAL   - チェック間隔（秒）、デフォルト 60
-#   READY_PARAM      - SSM パラメータ名（サーバー受付状態: "0"/"1"）
-#   PLAYERS_PARAM    - SSM パラメータ名（現在のプレイヤー数）
+#   CLUSTER_NAME          - ECS クラスター名
+#   SERVICE_NAME          - ECS サービス名
+#   AWS_REGION            - AWS リージョン
+#   MONITOR_PORT          - 監視するポート番号
+#   MONITOR_PROTOCOL      - "tcp" または "udp"
+#   MONITOR_METHOD        - "tcp", "a2s", "rest"（未設定時は MONITOR_PROTOCOL から推定）
+#   IDLE_MINUTES          - 無人タイムアウト（分）
+#   CHECK_INTERVAL        - フェーズB のチェック間隔（秒）、デフォルト 60
+#   READY_POLL_INTERVAL   - フェーズA の高速ポーリング間隔（秒）、デフォルト 10
+#   STARTUP_GRACE_MINUTES - 受付開始タイムアウト（分）、デフォルト 30
+#   READY_PARAM           - SSM パラメータ名（サーバー受付状態: "0"/"1"）
+#   PLAYERS_PARAM         - SSM パラメータ名（現在のプレイヤー数）
 # =============================================================================
 
 set -e
@@ -50,6 +53,8 @@ set -e
 
 MONITOR_PROTOCOL="${MONITOR_PROTOCOL:-tcp}"
 CHECK_INTERVAL="${CHECK_INTERVAL:-60}"
+READY_POLL_INTERVAL="${READY_POLL_INTERVAL:-10}"
+STARTUP_GRACE_MINUTES="${STARTUP_GRACE_MINUTES:-30}"
 
 echo "[monitor] =========================================="
 echo "[monitor] 自動シャットダウン監視スクリプト 起動"
@@ -58,7 +63,9 @@ echo "[monitor] サービス    : ${SERVICE_NAME}"
 echo "[monitor] リージョン  : ${AWS_REGION}"
 echo "[monitor] 監視ポート  : ${MONITOR_PORT}/${MONITOR_PROTOCOL}"
 echo "[monitor] アイドル上限: ${IDLE_MINUTES} 分"
-echo "[monitor] チェック間隔: ${CHECK_INTERVAL} 秒"
+echo "[monitor] チェック間隔（アイドル監視）: ${CHECK_INTERVAL} 秒"
+echo "[monitor] ポーリング間隔（受付待ち）  : ${READY_POLL_INTERVAL} 秒"
+echo "[monitor] 起動タイムアウト            : ${STARTUP_GRACE_MINUTES} 分"
 echo "[monitor] =========================================="
 
 # =============================================================================
@@ -83,17 +90,11 @@ if ! command -v aws > /dev/null 2>&1; then
     exit 1
 fi
 
-echo "[monitor] セットアップ完了。監視を開始します。"
+echo "[monitor] セットアップ完了。"
 
 # =============================================================================
-# ゲームコンテナの起動待機（起動直後の一時的な接続ゼロによる誤検知を防ぐ）
-# =============================================================================
-echo "[monitor] ゲームコンテナの起動を待機中（${CHECK_INTERVAL} 秒）..."
-sleep "${CHECK_INTERVAL}"
-
-# =============================================================================
-# SSM ステータスパラメータの初期化
-# 再起動時に前回の ready=1 をリセットし、古い「受付済み」通知の誤発火を防ぐ
+# SSM ステータスパラメータの初期化（install 直後・受付待ちフェーズ開始前）
+# 再起動時に前回の ready=1 をリセットし、古い「受付済み」表示・誤通知を防ぐ
 # READY_PARAM が未設定の場合はスキップ（SSM 連携なしで動作）
 # =============================================================================
 _server_ready=0
@@ -110,21 +111,16 @@ if [ -n "${READY_PARAM:-}" ]; then
 fi
 
 # =============================================================================
-# メイン監視ループ
+# 共通関数定義
 # =============================================================================
-idle_seconds=0
-idle_limit=$((IDLE_MINUTES * 60))
 
-echo "[monitor] 監視ループ開始（${IDLE_MINUTES} 分間接続ゼロで自動停止）"
-
-while true; do
-
-    # =========================================================================
-    # 接続数の取得
-    # 各メソッドは _ready（0=初期化中 / 1=受付開始済み）と
-    # conn_count（プレイヤー数、-1=不明）を設定する
-    # MONITOR_METHOD が設定されていない場合は MONITOR_PROTOCOL から後方互換で推定
-    # =========================================================================
+# ------------------------------------------------------------------
+# check_status: _method に応じた readiness・プレイヤー数チェック
+# 設定する変数:
+#   _ready      0=初期化中 / 1=受付開始済み
+#   conn_count  プレイヤー数（-1=不明）
+# ------------------------------------------------------------------
+check_status() {
     _method="${MONITOR_METHOD:-}"
     if [ -z "${_method}" ]; then
         if [ "${MONITOR_PROTOCOL}" = "tcp" ]; then
@@ -140,12 +136,7 @@ while true; do
     case "${_method}" in
 
         tcp)
-        # ----------------------------------------------------------------
         # TCP 接続数監視（精度高・推奨）
-        # ss コマンドでポートリッスン確認と ESTABLISHED 接続数をカウントする。
-        # awsvpc モードでネットワーク名前空間を共有しているため、
-        # サイドカーからゲームコンテナのポートを透過的に監視できる。
-        # ----------------------------------------------------------------
         _listen=$(ss -tlnH "( sport = :${MONITOR_PORT} )" 2>/dev/null | wc -l | tr -d ' \t')
         if [ "${_listen:-0}" -gt 0 ] 2>/dev/null; then
             _ready=1
@@ -154,12 +145,7 @@ while true; do
         ;;
 
         a2s)
-        # ----------------------------------------------------------------
         # Steam A2S_INFO クエリでプレイヤー数を取得
-        #
-        # 応答あり → ready=1, conn_count=プレイヤー数
-        # 応答なし（まだ起動中）→ ready=0, conn_count=0
-        # ----------------------------------------------------------------
         _a2s_result=$(python3 - <<'PYEOF' 2>/dev/null
 import os, socket, sys
 
@@ -170,19 +156,16 @@ def query_players(host, port):
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.settimeout(TIMEOUT)
     try:
-        # --- Step 1: A2S_INFO リクエスト（チャレンジなし）---
         req = b'\xFF\xFF\xFF\xFFTSource Engine Query\x00'
         s.sendto(req, (host, port))
         data, _ = s.recvfrom(1400)
 
-        # チャレンジ応答（0x41 = 'A'）が返ってきた場合は再送
         if len(data) >= 9 and data[4:5] == b'\x41':
             challenge = data[5:9]
             req2 = b'\xFF\xFF\xFF\xFFTSource Engine Query\x00' + challenge
             s.sendto(req2, (host, port))
             data, _ = s.recvfrom(1400)
 
-        # --- Step 2: A2S_INFO レスポンスをパース（0x49 = 'I'）---
         if len(data) < 6 or data[4:5] != b'\x49':
             print("0:0")
             return
@@ -216,17 +199,7 @@ PYEOF
         ;;
 
         rest)
-        # ----------------------------------------------------------------
-        # Palworld REST API でプレイヤー数を取得（Palworld 推奨方式）
-        #
-        # REST_API_ENABLED=true（thijsvanloef イメージのデフォルト）が前提。
-        # awsvpc でネットワーク名前空間を共有しているため 127.0.0.1 に到達できる。
-        #
-        # 応答パターン:
-        #   HTTP 200          → ready=1, conn_count=プレイヤー数
-        #   HTTP 401/403      → ready=1, conn_count=-1（認証エラー。受付は開始している）
-        #   タイムアウト/接続不可 → ready=0, conn_count=0（起動中）
-        # ----------------------------------------------------------------
+        # Palworld REST API でプレイヤー数を取得
         _rest_result=$(python3 - <<'PYEOF' 2>/dev/null
 import os, sys, json, base64
 import urllib.request, urllib.error
@@ -251,12 +224,11 @@ try:
         print("1:{}".format(len(data.get("players", []))))
 except urllib.error.HTTPError as e:
     if e.code in (401, 403):
-        # 認証エラーでもサーバーは受付開始している（パスワード設定の問題）
         print("1:-1")
     else:
-        print("0:0")   # その他 HTTP エラー → 起動中とみなす
+        print("0:0")
 except Exception:
-    print("0:0")       # タイムアウト/接続不可 → 起動中とみなす
+    print("0:0")
 PYEOF
 ) || _rest_result="0:0"
         if ! echo "${_rest_result}" | grep -qE '^[01]:(-1|[0-9]+)$'; then
@@ -273,29 +245,12 @@ PYEOF
         ;;
 
     esac
+}
 
-    # =========================================================================
-    # SSM へステータスを書き込む（READY_PARAM / PLAYERS_PARAM が設定されている場合）
-    # =========================================================================
-
-    # 初回受付開始を検知したら ready=1 を一度だけ書き込む
-    # → EventBridge がこれを検知して notify_ip Lambda が Discord へ通知する
-    if [ "${_ready}" = "1" ] && [ "${_server_ready}" = "0" ]; then
-        _server_ready=1
-        if [ -n "${READY_PARAM:-}" ]; then
-            echo "[monitor] ゲームサーバーの受付開始を検知。SSM へ ready=1 を書き込みます。"
-            aws ssm put-parameter \
-                --name "${READY_PARAM}" \
-                --value "1" \
-                --type String \
-                --overwrite \
-                --region "${AWS_REGION}" \
-                --no-cli-pager > /dev/null 2>&1 \
-                || echo "[monitor] 警告: SSM ready の書き込みに失敗しました（権限を確認）"
-        fi
-    fi
-
-    # 毎ループ players を更新（/status コマンドが参照）
+# ------------------------------------------------------------------
+# write_players: SSM players パラメータを更新（PLAYERS_PARAM が設定されている場合）
+# ------------------------------------------------------------------
+write_players() {
     if [ -n "${PLAYERS_PARAM:-}" ]; then
         aws ssm put-parameter \
             --name "${PLAYERS_PARAM}" \
@@ -305,15 +260,103 @@ PYEOF
             --region "${AWS_REGION}" \
             --no-cli-pager > /dev/null 2>&1 || true
     fi
+}
 
-    # =========================================================================
-    # 無人判定とアイドルカウンタの管理
-    # =========================================================================
-    if [ "${_ready}" = "0" ]; then
-        # まだ起動中 → アイドルカウンタを加算しない（起動中の誤検知防止）
-        echo "[monitor] サーバー初期化中。アイドルカウンタを一時停止します。"
+# ------------------------------------------------------------------
+# do_shutdown: 停止前バックアップ → ECS desired-count=0 → exit
+# ------------------------------------------------------------------
+do_shutdown() {
+    echo "[monitor] ========================================"
+    echo "[monitor] 自動シャットダウンを実行します..."
+    echo "[monitor] aws ecs update-service --desired-count 0"
+    echo "[monitor] ========================================"
 
-    elif [ "${conn_count}" = "-1" ]; then
+    if [ -n "${BACKUP_BUCKET:-}" ]; then
+        echo "[monitor] 停止前バックアップ開始: ${EFS_MOUNT_PATH} -> s3://${BACKUP_BUCKET}/${BACKUP_PREFIX}/"
+        if aws s3 sync "${EFS_MOUNT_PATH}/" "s3://${BACKUP_BUCKET}/${BACKUP_PREFIX}/" \
+            --region "${AWS_REGION}" \
+            --no-progress \
+            2>&1; then
+            echo "[monitor] バックアップ完了"
+        else
+            echo "[monitor] 警告: バックアップ同期に失敗しました。停止処理は継続します。"
+        fi
+    fi
+
+    if aws ecs update-service \
+        --cluster "${CLUSTER_NAME}" \
+        --service "${SERVICE_NAME}" \
+        --desired-count 0 \
+        --region "${AWS_REGION}" \
+        --no-cli-pager \
+        > /dev/null 2>&1; then
+        echo "[monitor] ECS サービスを停止しました（desired_count=0）。"
+        echo "[monitor] ECS がタスクを停止するまでしばらくお待ちください。"
+    else
+        echo "[monitor] エラー: update-service の実行に失敗しました。IAM 権限を確認してください。"
+    fi
+
+    exit 0
+}
+
+# =============================================================================
+# フェーズA: 受付待ち（高速ポーリング）
+# ゲームが接続受付を開始するまで READY_POLL_INTERVAL 秒間隔でチェックする。
+# 受付確認後すぐに SSM ready=1 を書込み → EventBridge → notify_ip → Discord 通知。
+# STARTUP_GRACE_MINUTES 以内に受付開始しなければコスト保護のため自動停止。
+# =============================================================================
+startup_grace_seconds=$((STARTUP_GRACE_MINUTES * 60))
+startup_elapsed=0
+
+echo "[monitor] フェーズA 開始（受付待ち・${READY_POLL_INTERVAL} 秒間隔・タイムアウト ${STARTUP_GRACE_MINUTES} 分）"
+
+while true; do
+    check_status
+    write_players
+
+    if [ "${_ready}" = "1" ]; then
+        echo "[monitor] ゲームサーバーの受付開始を検知！（起動から約 ${startup_elapsed} 秒）"
+        _server_ready=1
+        if [ -n "${READY_PARAM:-}" ]; then
+            echo "[monitor] SSM へ ready=1 を書き込みます → Discord IP 通知が送信されます"
+            aws ssm put-parameter \
+                --name "${READY_PARAM}" \
+                --value "1" \
+                --type String \
+                --overwrite \
+                --region "${AWS_REGION}" \
+                --no-cli-pager > /dev/null 2>&1 \
+                || echo "[monitor] 警告: SSM ready の書き込みに失敗しました（権限を確認）"
+        fi
+        break
+    fi
+
+    startup_elapsed=$((startup_elapsed + READY_POLL_INTERVAL))
+    if [ "${startup_elapsed}" -ge "${startup_grace_seconds}" ]; then
+        echo "[monitor] 起動タイムアウト（${STARTUP_GRACE_MINUTES} 分）: ゲームが受付を開始しませんでした。自動停止します。"
+        do_shutdown
+    fi
+
+    remaining_startup=$((startup_grace_seconds - startup_elapsed))
+    echo "[monitor] 受付待ち: ${startup_elapsed} 秒経過 / タイムアウトまで ${remaining_startup} 秒"
+    sleep "${READY_POLL_INTERVAL}"
+done
+
+# =============================================================================
+# フェーズB: アイドル監視（既存ロジック）
+# 受付開始後、接続ゼロが IDLE_MINUTES 分続いたら自動停止する。
+# =============================================================================
+idle_seconds=0
+idle_limit=$((IDLE_MINUTES * 60))
+
+echo "[monitor] フェーズB 開始（アイドル監視・${IDLE_MINUTES} 分間接続ゼロで自動停止）"
+
+while true; do
+
+    check_status
+    write_players
+
+    if [ "${conn_count}" = "-1" ]; then
         # REST API 認証エラー等 → プレイヤー数不明。カウンタ変更なし
         echo "[monitor] 警告: プレイヤー数が不明（REST API 認証エラー？ADMIN_PASSWORD を確認）。アイドルカウンタを変更しません。"
 
@@ -332,45 +375,8 @@ PYEOF
         echo "[monitor] 無人状態: ${idle_seconds} 秒 / ${idle_limit} 秒（残り ${remaining} 秒）"
 
         if [ "${idle_seconds}" -ge "${idle_limit}" ]; then
-            echo "[monitor] ========================================"
-            echo "[monitor] 無人タイムアウト到達。自動シャットダウンを実行します..."
-            echo "[monitor] aws ecs update-service --desired-count 0"
-            echo "[monitor] ========================================"
-
-            # -------------------------------------------------------
-            # 停止前バックアップ: EFS → S3 同期
-            # BACKUP_BUCKET が設定されている場合のみ実行する
-            # -------------------------------------------------------
-            if [ -n "${BACKUP_BUCKET:-}" ]; then
-                echo "[monitor] 停止前バックアップ開始: ${EFS_MOUNT_PATH} -> s3://${BACKUP_BUCKET}/${BACKUP_PREFIX}/"
-                if aws s3 sync "${EFS_MOUNT_PATH}/" "s3://${BACKUP_BUCKET}/${BACKUP_PREFIX}/" \
-                    --region "${AWS_REGION}" \
-                    --no-progress \
-                    2>&1; then
-                    echo "[monitor] バックアップ完了"
-                else
-                    # バックアップ失敗でもサーバー停止は継続する（安全設計）
-                    echo "[monitor] 警告: バックアップ同期に失敗しました。停止処理は継続します。"
-                fi
-            fi
-
-            # ECS Service の desired_count を 0 に設定
-            # タスクロールの ecs:UpdateService 権限を使って実行する
-            if aws ecs update-service \
-                --cluster "${CLUSTER_NAME}" \
-                --service "${SERVICE_NAME}" \
-                --desired-count 0 \
-                --region "${AWS_REGION}" \
-                --no-cli-pager \
-                > /dev/null 2>&1; then
-                echo "[monitor] ECS サービスを停止しました（desired_count=0）。"
-                echo "[monitor] ECS がタスクを停止するまでしばらくお待ちください。"
-            else
-                echo "[monitor] エラー: update-service の実行に失敗しました。IAM 権限を確認してください。"
-            fi
-
-            # コンテナを正常終了（essential=false のためゲームコンテナは継続）
-            exit 0
+            echo "[monitor] 無人タイムアウト到達。"
+            do_shutdown
         fi
     fi
 

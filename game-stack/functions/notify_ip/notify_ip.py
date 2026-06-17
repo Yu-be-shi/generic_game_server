@@ -30,6 +30,8 @@ DISCORD_WEBHOOK_URL = os.environ["DISCORD_WEBHOOK_URL"]
 GAME_NAME = os.environ["GAME_NAME"]
 CLUSTER_ARN = os.environ.get("CLUSTER_ARN", "")
 READY_PARAM = os.environ.get("READY_PARAM", "")
+# 最後に通知したタスク ARN を記録するパラメータ名（同一タスクへの重複通知を排除）
+NOTIFIED_PARAM = READY_PARAM.replace("/ready", "/notified_task") if READY_PARAM else ""
 
 AWS_REGION = os.environ.get("AWS_REGION", "ap-northeast-1")
 
@@ -74,11 +76,22 @@ def lambda_handler(event, context):
             logger.info("ready の値が '1' でないためスキップ: value=%s", value)
             return
 
-        # 実行中タスクのパブリック IP を取得
-        public_ip = get_public_ip_from_running_task()
-        if public_ip is None:
+        # 実行中タスクのパブリック IP とタスク ARN を取得
+        result = get_public_ip_from_running_task()
+        if result is None:
             logger.warning("パブリック IP を取得できませんでした。通知をスキップします。")
             return
+        public_ip, task_arn = result
+
+        # 同一タスクへの重複通知を排除（EventBridge at-least-once 再配信・Lambda リトライ対策）
+        if NOTIFIED_PARAM and task_arn:
+            try:
+                prev = ssm.get_parameter(Name=NOTIFIED_PARAM)["Parameter"]["Value"]
+                if prev == task_arn:
+                    logger.info("同一 task_arn のためスキップ: %s", task_arn)
+                    return
+            except ssm.exceptions.ParameterNotFound:
+                pass  # 初回通知
 
         message = (
             f"🟢 **{GAME_NAME}** サーバーが接続可能になりました！\n"
@@ -86,18 +99,26 @@ def lambda_handler(event, context):
         )
         try:
             send_discord_message(message)
-            logger.info("Discord 起動通知送信完了: IP=%s", public_ip)
+            logger.info("Discord 起動通知送信完了: IP=%s task_arn=%s", public_ip, task_arn)
         except Exception:
             logger.exception("Discord 通知中にエラーが発生しました")
+            return
+
+        # 通知済みタスク ARN を記録（次回の重複排除に使用）
+        if NOTIFIED_PARAM and task_arn:
+            try:
+                ssm.put_parameter(Name=NOTIFIED_PARAM, Value=task_arn, Type="String", Overwrite=True)
+            except Exception:
+                logger.warning("notified_task の記録に失敗（次回重複する可能性あり）")
         return
 
     logger.warning("未知のイベント source=%s", source)
 
 
-def get_public_ip_from_running_task() -> str | None:
+def get_public_ip_from_running_task():
     """
-    ECS 実行中タスクのパブリック IP を ENI 経由で取得する。
-    CLUSTER_ARN 環境変数で対象クラスターを指定する。
+    ECS 実行中タスクのパブリック IP と タスク ARN を返す (public_ip, task_arn)。
+    取得失敗時は None を返す。
     """
     if not CLUSTER_ARN:
         logger.error("CLUSTER_ARN が設定されていません")
@@ -114,6 +135,7 @@ def get_public_ip_from_running_task() -> str | None:
             return None
 
         task = tasks[0]
+        task_arn = task.get("taskArn", "")
 
         # attachments から ENI ID を探す
         eni_id = None
@@ -131,7 +153,7 @@ def get_public_ip_from_running_task() -> str | None:
             logger.warning("ENI ID が見つかりません。attachments: %s", json.dumps(task.get("attachments", [])))
             return None
 
-        logger.info("ENI ID: %s", eni_id)
+        logger.info("ENI ID: %s task_arn: %s", eni_id, task_arn)
 
         interfaces = ec2.describe_network_interfaces(NetworkInterfaceIds=[eni_id])["NetworkInterfaces"]
         if not interfaces:
@@ -141,7 +163,8 @@ def get_public_ip_from_running_task() -> str | None:
         public_ip = interfaces[0].get("Association", {}).get("PublicIp")
         if not public_ip:
             logger.warning("パブリック IP が見つかりません。ENI: %s", eni_id)
-        return public_ip
+            return None
+        return public_ip, task_arn
 
     except Exception:
         logger.exception("タスク情報取得失敗")

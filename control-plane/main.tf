@@ -107,6 +107,15 @@ resource "aws_iam_role_policy" "discord_control" {
         Condition = {
           StringEquals = { "iam:PassedToService" = "ecs-tasks.amazonaws.com" }
         }
+      },
+      {
+        # /start 時に SSM ready を 0 にリセットする（古い ready=1 残留による誤「稼働中」防止）
+        # monitor サイドカーが起動直後に 0 を書くまでの空白を埋め、
+        # monitor 起動失敗時も /status が「起動処理中」を返すようにする。
+        Sid      = "SsmStatusReset"
+        Effect   = "Allow"
+        Action   = ["ssm:PutParameter"]
+        Resource = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/ggs/*"
       }
     ]
   })

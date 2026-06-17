@@ -180,6 +180,25 @@ def _cmd_start(game_name: str) -> dict:
         logger.info("最新タスク定義を指定して起動: %s", latest_task_def_arn)
 
     ecs.update_service(**update_kwargs)
+
+    # /start の時点で SSM ready を 0 にリセットする。
+    # monitor が ready=0 を書くまでの空白（約30〜90秒）で古い ready=1 が残ると
+    # /status が「稼働中」と誤表示するため、ここで先手を打つ。
+    # monitor 起動失敗時も /status が永久に「稼働中」になるのを防ぐ。
+    # (notify_ip.py は value!="1" をスキップするため誤通知なし)
+    ssm_prefix = _get_cluster_tag(cluster_arn, "StatusParamPrefix")
+    if ssm_prefix:
+        try:
+            ssm.put_parameter(
+                Name=f"{ssm_prefix}/ready",
+                Value="0",
+                Type="String",
+                Overwrite=True,
+            )
+            logger.info("/start: SSM ready を 0 にリセット: %s/ready", ssm_prefix)
+        except Exception:
+            logger.warning("/start: SSM ready のリセットに失敗（権限確認を）: %s/ready", ssm_prefix)
+
     return _ephemeral(
         f"✅ **{game_name}** の起動を開始しました！\n"
         f"接続可能になったら IP が通知されます 📨"
