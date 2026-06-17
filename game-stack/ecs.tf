@@ -35,6 +35,9 @@ resource "aws_ecs_cluster" "game" {
     # StatusParamPrefix タグ: /status コマンドが SSM パラメータを読む際のプレフィックス
     # monitor サイドカーが "/ggs/${local.name_prefix}/ready" 等に書き込む
     StatusParamPrefix = "/ggs/${local.name_prefix}"
+    # AutoUpdateFunction タグ: /update コマンドが Worker Lambda 名を取得するために使用する
+    # discord_control Lambda が cluster タグ経由でこの関数を非同期 invoke する
+    AutoUpdateFunction = "${local.name_prefix}-auto-update"
   }
 }
 
@@ -141,6 +144,7 @@ resource "aws_ecs_task_definition" "game" {
         { name = "REST_API_PASSWORD", value = lookup(var.environment_variables, "ADMIN_PASSWORD", "") },
         { name = "IDLE_MINUTES", value = tostring(var.idle_timeout_minutes) },
         { name = "CHECK_INTERVAL", value = "60" },
+        { name = "READY_POLL_INTERVAL", value = "5" }, # フェーズA: ポート待ち受け検知の粒度（秒）
         # 停止前バックアップ用（auto_shutdown.sh が参照する）
         { name = "BACKUP_BUCKET", value = aws_s3_bucket.backup.id },
         { name = "BACKUP_PREFIX", value = local.name_prefix },
@@ -148,6 +152,10 @@ resource "aws_ecs_task_definition" "game" {
         # SSM ステータス連携（Discord 通知・/status コマンド用）
         { name = "READY_PARAM", value = "/ggs/${local.name_prefix}/ready" },
         { name = "PLAYERS_PARAM", value = "/ggs/${local.name_prefix}/players" },
+        # Steam バージョンチェック連携（steam_app_id 設定時のみ使用）
+        # monitor が appmanifest から buildid を読んで SSM に書き込む
+        { name = "STEAM_APP_ID", value = var.steam_app_id },
+        { name = "BUILDID_PARAM", value = "/ggs/${local.name_prefix}/installed_buildid" },
       ]
 
       # セーブデータを読み取るために EFS をマウント（読み取り専用）

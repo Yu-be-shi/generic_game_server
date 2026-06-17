@@ -263,6 +263,53 @@ write_players() {
 }
 
 # ------------------------------------------------------------------
+# write_buildid: インストール済み Steam buildid を SSM に保存
+# STEAM_APP_ID が設定されている場合のみ実行（非 Steam 系はスキップ）
+# appmanifest_<appid>.acf を EFS から探して buildid を抽出し
+# BUILDID_PARAM に書き込む。不在・抽出失敗は警告のみ（fail-open）。
+# ------------------------------------------------------------------
+write_buildid() {
+    [ -z "${STEAM_APP_ID:-}" ]  && return 0
+    [ -z "${BUILDID_PARAM:-}" ] && return 0
+
+    local manifest
+    manifest=$(find "${EFS_MOUNT_PATH:-/}" \
+        -name "appmanifest_${STEAM_APP_ID}.acf" 2>/dev/null | head -n1)
+
+    if [ -z "${manifest}" ]; then
+        echo "[monitor] buildid スキップ: appmanifest_${STEAM_APP_ID}.acf が見つかりません（初回 install 前？）"
+        return 0
+    fi
+
+    local buildid
+    buildid=$(python3 - "${manifest}" << 'PYEOF'
+import re, sys
+try:
+    content = open(sys.argv[1]).read()
+    m = re.search(r'"buildid"\s+"(\d+)"', content)
+    print(m.group(1) if m else "", end="")
+except Exception:
+    print("", end="")
+PYEOF
+)
+
+    if [ -z "${buildid}" ]; then
+        echo "[monitor] 警告: appmanifest_${STEAM_APP_ID}.acf から buildid を抽出できませんでした"
+        return 0
+    fi
+
+    echo "[monitor] installed_buildid=${buildid} を SSM ${BUILDID_PARAM} に書き込みます"
+    aws ssm put-parameter \
+        --name "${BUILDID_PARAM}" \
+        --value "${buildid}" \
+        --type String \
+        --overwrite \
+        --region "${AWS_REGION}" \
+        --no-cli-pager > /dev/null 2>&1 \
+        || echo "[monitor] 警告: buildid の SSM 書き込みに失敗しました（IAM 権限を確認）"
+}
+
+# ------------------------------------------------------------------
 # do_shutdown: 停止前バックアップ → ECS desired-count=0 → exit
 # ------------------------------------------------------------------
 do_shutdown() {
@@ -317,6 +364,9 @@ while true; do
     if [ "${_ready}" = "1" ]; then
         echo "[monitor] ゲームサーバーの受付開始を検知！（起動から約 ${startup_elapsed} 秒）"
         _server_ready=1
+        # Steam 系ゲームの場合: appmanifest から installed buildid を読んで SSM に保存する。
+        # ready=1 より先に書くことで、Worker Lambda が stop_task する前に確実に永続化される。
+        write_buildid
         if [ -n "${READY_PARAM:-}" ]; then
             echo "[monitor] SSM へ ready=1 を書き込みます → Discord IP 通知が送信されます"
             aws ssm put-parameter \
