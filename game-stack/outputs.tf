@@ -91,3 +91,29 @@ output "server_management_commands" {
       --query "services[0].{Status:status,Running:runningCount,Desired:desiredCount}"
   EOT
 }
+
+output "cost_notification_test_command" {
+  description = <<-EOT
+    コスト通知の疎通テスト用コマンド。
+    実行すると SNS → Lambda(notify_cost) → Discord/Slack の経路を即検証できる。
+    AWS Budgets の実際のしきい値到達を待たずに通知経路を確認可能。
+  EOT
+  value       = <<-EOT
+
+    # === コスト通知の疎通テスト ===
+    # 下記コマンドを実行し、Discord/Slack にテストメッセージが届けば
+    # SNS → Lambda → webhook の経路が正常です。
+
+    aws sns publish \
+      --topic-arn ${aws_sns_topic.cost_alert.arn} \
+      --subject "コスト通知 疎通テスト" \
+      --message "これはテストです。Discord に届けば SNS→Lambda→webhook は正常です。" \
+      --region ${var.aws_region}
+
+    # DLQ 確認（Lambda 障害時のメッセージ蓄積を確認）:
+    aws sqs get-queue-attributes \
+      --queue-url $(aws sqs get-queue-url --queue-name ${aws_sqs_queue.notify_cost_dlq.name} --region ${var.aws_region} --query QueueUrl --output text) \
+      --attribute-names ApproximateNumberOfMessages \
+      --region ${var.aws_region}
+  EOT
+}
