@@ -99,6 +99,31 @@ variable "environment_variables" {
   default     = {}
 }
 
+# Steam バージョンチェック設定（非 Steam 系ゲームは空のまま）
+variable "steam_app_id" {
+  description = <<-EOT
+    Steam Dedicated Server のアプリID（数字のみ）。
+    設定すると /update 実行時に steamcmd.net の公開 API でバージョンを事前照合し、
+    既に最新の場合はコンテナを起動せず数秒で完了します。
+    空文字列（デフォルト）の場合、チェックを行わず常にアップデートを実行します。
+    例: Palworld Dedicated Server = "2394010"
+        非 Steam 系（Minecraft 等）= "" のまま
+  EOT
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = can(regex("^[0-9]*$", var.steam_app_id))
+    error_message = "steam_app_id は数字のみで構成される文字列（または空文字列）を指定してください。"
+  }
+}
+
+variable "steam_branch" {
+  description = "steamcmd.net でバージョン確認する際のブランチ名（通常は \"public\"）。"
+  type        = string
+  default     = "public"
+}
+
 # -----------------------------------------------------------
 # 自動シャットダウン（サイドカー監視）設定
 # -----------------------------------------------------------
@@ -185,13 +210,24 @@ variable "desired_count" {
 # -----------------------------------------------------------
 
 variable "discord_webhook_url" {
-  description = "Discord の Webhook URL。IP 通知およびコストアラートの送信先。Discordサーバー設定 → 連携サービス → ウェブフック から取得"
+  description = "通知先 Webhook URL。Discord の場合は Discordサーバー設定 → 連携サービス → ウェブフック から取得。Slack 等に切り替える場合はその Incoming Webhook URL を指定"
   type        = string
   sensitive   = true
 
   validation {
-    condition     = can(regex("^https://discord\\.com/api/webhooks/", var.discord_webhook_url))
-    error_message = "discord_webhook_url は https://discord.com/api/webhooks/ で始まる URL を指定してください。"
+    condition     = can(regex("^https://", var.discord_webhook_url))
+    error_message = "discord_webhook_url は https:// で始まる URL を指定してください。"
+  }
+}
+
+variable "messaging_provider" {
+  description = "メッセージングプロバイダー。'discord' または 'slack'（既定: discord）。切り替え時は discord_webhook_url に対応ツールの Webhook URL を設定し、control-plane/functions/discord_control/provider.py も更新すること"
+  type        = string
+  default     = "discord"
+
+  validation {
+    condition     = contains(["discord", "slack"], var.messaging_provider)
+    error_message = "messaging_provider は 'discord' または 'slack' を指定してください。"
   }
 }
 
@@ -207,6 +243,41 @@ variable "budget_limit_usd" {
   validation {
     condition     = var.budget_limit_usd > 0 && var.budget_limit_usd <= 100
     error_message = "budget_limit_usd は 0 より大きく 100 以下の値を指定してください。"
+  }
+}
+
+variable "alert_email" {
+  description = <<-EOT
+    コストアラートのメール送信先（オプション）。
+    設定するとコスト通知 SNS トピックにメール購読が追加され、
+    Discord/Lambda が障害を起こしても独立したチャネルで通知が届く。
+    空文字列（デフォルト）の場合はメール通知を作成しない。
+    初回 apply 後に AWS から確認メールが届くので「Confirm subscription」リンクを踏むこと。
+    例: "me@example.com"
+  EOT
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.alert_email == "" || can(regex("^[^@]+@[^@]+\\.[^@]+$", var.alert_email))
+    error_message = "alert_email は空文字列または有効なメールアドレス形式で指定してください。"
+  }
+}
+
+variable "max_task_runtime_hours" {
+  description = <<-EOT
+    コストガードバックストップの閾値（時間）。
+    この時間を超えて RUNNING なタスクを強制停止する。
+    アイドル自動停止（monitor サイドカー）の代替ではなく最終安全網。
+    通常プレイ中に誤発動しないよう余裕を持った値（デフォルト 12 時間）を推奨。
+    max_runtime_hours > idle_timeout_minutes/60 となるよう設定すること。
+  EOT
+  type        = number
+  default     = 24
+
+  validation {
+    condition     = var.max_task_runtime_hours >= 1 && var.max_task_runtime_hours <= 72
+    error_message = "max_task_runtime_hours は 1〜72 の範囲で指定してください。"
   }
 }
 
