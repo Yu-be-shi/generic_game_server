@@ -171,6 +171,9 @@ resource "aws_lambda_function" "discord_control" {
   # Discord の3秒制限に十分な余裕を持たせる
   timeout = 10
 
+  # Graviton (arm64) で実行（純 Python のため無改修で約 20% コスト削減）
+  architectures = ["arm64"]
+
   environment {
     variables = {
       DISCORD_PUBLIC_KEY       = var.discord_public_key

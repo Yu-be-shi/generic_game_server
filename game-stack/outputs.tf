@@ -4,13 +4,13 @@
 # ※ パブリック IP は動的なため出力対象外。Discord 通知で確認してください。
 
 output "vpc_id" {
-  description = "VPC ID"
-  value       = aws_vpc.main.id
+  description = "共有 VPC の ID（control-plane で管理・全ゲームで共有）"
+  value       = data.aws_vpc.shared.id
 }
 
 output "public_subnet_ids" {
-  description = "パブリックサブネットの ID 一覧（2 AZ）"
-  value       = aws_subnet.public[*].id
+  description = "共有 VPC のパブリックサブネット ID 一覧（2 AZ）"
+  value       = data.aws_subnets.public.ids
 }
 
 output "ecs_cluster_name" {

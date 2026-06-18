@@ -54,6 +54,12 @@ resource "aws_ecs_task_definition" "game" {
   execution_role_arn       = aws_iam_role.task_execution.arn
   task_role_arn            = aws_iam_role.task.arn
 
+  # CPU アーキテクチャ設定（既定: X86_64、Graviton 化は task_cpu_architecture="ARM64" で opt-in）
+  runtime_platform {
+    cpu_architecture        = var.task_cpu_architecture
+    operating_system_family = "LINUX"
+  }
+
   # EFS ボリューム（セーブデータ永続化）
   # transit_encryption=ENABLED でネットワーク転送を暗号化
   # iam=ENABLED でタスクロールを使ってアクセス制御
@@ -126,10 +132,11 @@ resource "aws_ecs_task_definition" "game" {
     # EFS もマウントし、サーバー停止直前に S3 へセーブデータを同期する。
     {
       name      = "monitor"
-      image     = "amazonlinux:2023"
+      image     = var.monitor_image # 既定: "amazonlinux:2023"（事前ビルドイメージで置き換え可）
       essential = false
 
-      # scripts/auto_shutdown.sh の内容をインラインで埋め込む（ECR / Dockerfile 不要）
+      # scripts/auto_shutdown.sh の内容をインラインで埋め込む（イメージに依存しない注入方式）
+      # monitor_image に依存パッケージ入りの事前ビルドイメージを使う場合も dnf はスキップされる
       command = ["sh", "-c", file("${path.module}/scripts/auto_shutdown.sh")]
 
       # Terraform から監視設定・バックアップ設定を環境変数として注入
@@ -197,7 +204,7 @@ resource "aws_ecs_service" "game" {
   platform_version = "LATEST"
 
   network_configuration {
-    subnets          = aws_subnet.public[*].id
+    subnets          = data.aws_subnets.public.ids
     security_groups  = [aws_security_group.game.id]
     assign_public_ip = true # NAT/ALB なしでインターネット通信（固定費ゼロ）
   }

@@ -151,12 +151,15 @@ resource "aws_lambda_function" "auto_update" {
   memory_size = 256
   # VPC 不要: ECS/SSM 制御 API のみ使用（EFS をマウントしない）
 
+  # Graviton (arm64) で実行（純 Python のため無改修で約 20% コスト削減）
+  architectures = ["arm64"]
+
   environment {
     variables = {
       CLUSTER_ARN       = aws_ecs_cluster.game.arn
       SERVICE_NAME      = local.service_name
       TASK_DEF_FAMILY   = local.name_prefix
-      SUBNET_IDS        = join(",", aws_subnet.public[*].id)
+      SUBNET_IDS        = join(",", data.aws_subnets.public.ids)
       SECURITY_GROUP_ID = aws_security_group.game.id
       NAME_PREFIX       = local.name_prefix
       GAME_NAME         = var.game_name

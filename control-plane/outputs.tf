@@ -17,6 +17,21 @@ output "lambda_function_name" {
   value       = aws_lambda_function.discord_control.function_name
 }
 
+output "shared_vpc_id" {
+  description = "全ゲームで共有する VPC の ID。game-stack は 'ggs-shared-vpc' タグで自動参照するため、この値の直接設定は不要。"
+  value       = aws_vpc.shared.id
+}
+
+output "shared_public_subnet_ids" {
+  description = "共有 VPC のパブリックサブネット ID 一覧（2 AZ）。game-stack は 'ggs-shared=true' タグで自動参照する。"
+  value       = aws_subnet.public[*].id
+}
+
+output "monitor_ecr_repository_uri" {
+  description = "モニターサイドカー用 ECR リポジトリ URI。game-stack の monitor_image 変数に設定して起動時の dnf install を省略できる（詳細: control-plane/ecr.tf のコメント参照）"
+  value       = aws_ecr_repository.monitor.repository_url
+}
+
 output "next_steps" {
   description = "デプロイ後の次のステップ"
   value       = <<-EOT

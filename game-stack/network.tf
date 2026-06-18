@@ -1,9 +1,14 @@
 # ============================================================
-# network.tf - データソース、ローカル変数、VPC/サブネット/SG
+# network.tf - データソース、ローカル変数、セキュリティグループ
 # ============================================================
 # 設計方針（固定費ゼロ）:
 #   NAT Gateway / ALB / NLB / Route53 は使用しない。
 #   ECS タスクに直接パブリック IP を付与し、インターネット通信を実現する。
+#
+# VPC・サブネット・IGW・ルートテーブル・S3 VPC Endpoint は
+# control-plane/network.tf で一元管理する共有リソース。
+# ゲームごとのセキュリティグループのみここで定義し、分離を維持する。
+# control-plane を先に apply してから game-stack を apply すること。
 
 # -----------------------------------------------------------
 # データソース
@@ -15,6 +20,26 @@ data "aws_availability_zones" "available" {
 
 # IAM ポリシーの Resource ARN 構築に使用（iam.tf / notifications.tf から参照）
 data "aws_caller_identity" "current" {}
+
+# control-plane が作成した共有 VPC を "ggs-shared-vpc" タグで検索して参照する。
+# remote_state ではなくタグルックアップを使うことで、game-stack は
+# control-plane の backend 設定に依存せず疎結合を保つ。
+data "aws_vpc" "shared" {
+  tags = {
+    Name = "ggs-shared-vpc"
+  }
+}
+
+# 共有 VPC 内のパブリックサブネット（"ggs-shared=true" タグで識別）
+data "aws_subnets" "public" {
+  filter {
+    name   = "vpc-id"
+    values = [data.aws_vpc.shared.id]
+  }
+  tags = {
+    ggs-shared = "true"
+  }
+}
 
 # -----------------------------------------------------------
 # ローカル変数
@@ -29,76 +54,14 @@ locals {
 }
 
 # -----------------------------------------------------------
-# VPC
-# -----------------------------------------------------------
-
-resource "aws_vpc" "main" {
-  cidr_block           = "10.0.0.0/16"
-  enable_dns_support   = true
-  enable_dns_hostnames = true # EFS の DNS 名前解決に必要
-
-  tags = {
-    Name = "${local.name_prefix}-vpc"
-  }
-}
-
-# インターネットゲートウェイ（ALB/NAT は使わず IGW 直結で固定費ゼロを実現）
-resource "aws_internet_gateway" "main" {
-  vpc_id = aws_vpc.main.id
-
-  tags = {
-    Name = "${local.name_prefix}-igw"
-  }
-}
-
-# -----------------------------------------------------------
-# パブリックサブネット（2 AZ）
-# 2 AZ にするのは EFS マウントターゲットの冗長化と
-# Fargate のタスク配置安定性のため（サブネット自体は無料）
-# -----------------------------------------------------------
-
-resource "aws_subnet" "public" {
-  count = 2
-
-  vpc_id                  = aws_vpc.main.id
-  cidr_block              = "10.0.${count.index}.0/24"
-  availability_zone       = data.aws_availability_zones.available.names[count.index]
-  map_public_ip_on_launch = true
-
-  tags = {
-    Name = "${local.name_prefix}-public-${count.index}"
-  }
-}
-
-resource "aws_route_table" "public" {
-  vpc_id = aws_vpc.main.id
-
-  route {
-    cidr_block = "0.0.0.0/0"
-    gateway_id = aws_internet_gateway.main.id
-  }
-
-  tags = {
-    Name = "${local.name_prefix}-rt"
-  }
-}
-
-resource "aws_route_table_association" "public" {
-  count = 2
-
-  subnet_id      = aws_subnet.public[count.index].id
-  route_table_id = aws_route_table.public.id
-}
-
-# -----------------------------------------------------------
-# セキュリティグループ
+# セキュリティグループ（ゲームごとに個別作成・共有 VPC 内に配置）
 # -----------------------------------------------------------
 
 # ゲームサーバー用 SG（game_ports に基づいてポートを動的に開放）
 resource "aws_security_group" "game" {
   name        = "${local.name_prefix}-game-sg"
   description = "${var.game_name} game server security group"
-  vpc_id      = aws_vpc.main.id
+  vpc_id      = data.aws_vpc.shared.id
 
   dynamic "ingress" {
     for_each = var.game_ports
@@ -128,7 +91,7 @@ resource "aws_security_group" "game" {
 resource "aws_security_group" "efs" {
   name        = "${local.name_prefix}-efs-sg"
   description = "EFS security group - allow NFS from game containers and backup Lambda"
-  vpc_id      = aws_vpc.main.id
+  vpc_id      = data.aws_vpc.shared.id
 
   ingress {
     description = "NFS from game containers and backup Lambda"

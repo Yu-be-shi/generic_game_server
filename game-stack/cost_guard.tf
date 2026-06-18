@@ -121,6 +121,9 @@ resource "aws_lambda_function" "cost_guard" {
   source_code_hash = data.archive_file.cost_guard.output_base64sha256
   timeout          = 60
 
+  # Graviton (arm64) で実行（純 Python のため無改修で約 20% コスト削減）
+  architectures = ["arm64"]
+
   environment {
     variables = {
       CLUSTER_ARN       = aws_ecs_cluster.game.arn

@@ -73,7 +73,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "backup" {
 
     filter {} # バケット全体に適用
 
-    # 30日前の非カレントバージョンを削除（コスト抑制）
+    # 30 日前の非カレントバージョンを削除（コスト抑制）
     noncurrent_version_expiration {
       noncurrent_days = 30
     }
@@ -83,25 +83,35 @@ resource "aws_s3_bucket_lifecycle_configuration" "backup" {
       days_after_initiation = 7
     }
   }
-}
 
-# ============================================================
-# S3 Gateway VPC Endpoint（無料）
-# VPC 内 Lambda が NAT Gateway なしで S3 に直接アクセスするために必要
-# ============================================================
+  rule {
+    id     = "tiering"
+    status = "Enabled"
 
-resource "aws_vpc_endpoint" "s3" {
-  vpc_id            = aws_vpc.main.id
-  service_name      = "com.amazonaws.${var.aws_region}.s3"
-  vpc_endpoint_type = "Gateway"
+    filter {} # バケット全体に適用
 
-  # パブリックサブネットのルートテーブルに S3 エントリを追加する
-  route_table_ids = [aws_route_table.public.id]
+    # カレントバージョン: 30 日後に STANDARD_IA へ移行（標準の約 56% 安い）
+    # ※ S3 の最小課金オブジェクトサイズは 128KB、最小保存期間は 30 日。
+    #   セーブデータが非常に小さい（< 128KB）場合は効果がないことがある。
+    transition {
+      days          = 30
+      storage_class = "STANDARD_IA"
+    }
 
-  tags = {
-    Name = "${local.name_prefix}-s3-endpoint"
+    # 非カレントバージョン: 7 日後に GLACIER_IR へ移行（IA よりさらに約 68% 安い）
+    # ロールバック用の旧バージョンは高頻度アクセス不要のため Glacier に適している
+    noncurrent_version_transition {
+      noncurrent_days = 7
+      storage_class   = "GLACIER_IR"
+    }
   }
 }
+
+# ============================================================
+# S3 Gateway VPC Endpoint は control-plane/network.tf に移設済み
+# ============================================================
+# VPC が共有化されたため、S3 VPC エンドポイントは control-plane で一元管理する。
+# game-stack での作成は不要（共有ルートテーブルにすでにエントリが存在する）。
 
 # ============================================================
 # バックアップ Lambda 用セキュリティグループ
@@ -111,7 +121,7 @@ resource "aws_vpc_endpoint" "s3" {
 resource "aws_security_group" "backup_lambda" {
   name        = "${local.name_prefix}-backup-lambda-sg"
   description = "Backup Lambda - outbound to EFS NFS and S3"
-  vpc_id      = aws_vpc.main.id
+  vpc_id      = data.aws_vpc.shared.id
 
   # アウトバウンド全許可（EFS:2049 + S3 Gateway Endpoint 経由 HTTPS）
   egress {
@@ -226,6 +236,9 @@ resource "aws_lambda_function" "backup_efs" {
   timeout     = 900
   memory_size = 512
 
+  # Graviton (arm64) で実行（純 Python のため無改修で約 20% コスト削減）
+  architectures = ["arm64"]
+
   # EFS をマウントする（既存のアクセスポイントを流用）
   file_system_config {
     arn              = aws_efs_access_point.main.arn
@@ -234,7 +247,7 @@ resource "aws_lambda_function" "backup_efs" {
 
   # VPC 内に配置（EFS と S3 Gateway Endpoint に到達するため）
   vpc_config {
-    subnet_ids         = aws_subnet.public[*].id
+    subnet_ids         = data.aws_subnets.public.ids
     security_group_ids = [aws_security_group.backup_lambda.id]
   }
 

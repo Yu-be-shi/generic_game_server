@@ -100,6 +100,9 @@ resource "aws_lambda_function" "notify_ip" {
   source_code_hash = data.archive_file.notify_ip.output_base64sha256
   timeout          = 30
 
+  # Graviton (arm64) で実行（純 Python のため無改修で約 20% コスト削減）
+  architectures = ["arm64"]
+
   environment {
     variables = {
       # メッセージング設定（ツール非依存）
@@ -298,6 +301,9 @@ resource "aws_lambda_function" "notify_cost" {
   source_code_hash = data.archive_file.notify_cost.output_base64sha256
   timeout          = 10
 
+  # Graviton (arm64) で実行（純 Python のため無改修で約 20% コスト削減）
+  architectures = ["arm64"]
+
   # SNS 非同期 invoke がリトライ後も失敗した場合（webhook 403 等）のメッセージを保存
   dead_letter_config {
     target_arn = aws_sqs_queue.notify_cost_dlq.arn
@@ -348,48 +354,21 @@ resource "aws_sqs_queue" "notify_cost_dlq" {
   }
 }
 
-# CloudWatch アラーム: DLQ にメッセージが届いたら通知（webhook 障害の検知）
-# alarm_actions に cost_alert SNS トピックを指定: email 購読があればメールでも届く
-resource "aws_cloudwatch_metric_alarm" "notify_cost_dlq" {
-  alarm_name          = "${local.name_prefix}-notify-cost-dlq"
-  alarm_description   = "notify_cost Lambda の配信失敗（DLQ にメッセージ到着）"
-  namespace           = "AWS/SQS"
-  metric_name         = "ApproximateNumberOfMessagesVisible"
-  dimensions          = { QueueName = aws_sqs_queue.notify_cost_dlq.name }
-  statistic           = "Sum"
-  period              = 300 # 5 分
-  evaluation_periods  = 1
-  threshold           = 0
-  comparison_operator = "GreaterThanThreshold"
-  treat_missing_data  = "notBreaching"
-  alarm_actions       = [aws_sns_topic.cost_alert.arn]
-  ok_actions          = [aws_sns_topic.cost_alert.arn]
-
-  tags = {
-    Name = "${local.name_prefix}-notify-cost-dlq-alarm"
-  }
-}
-
-# CloudWatch アラーム: SNS → Lambda 配信失敗数の監視
-# NumberOfNotificationsFailed は SNS が Lambda へのデリバリーに失敗した回数
-resource "aws_cloudwatch_metric_alarm" "cost_alert_delivery_failed" {
-  alarm_name          = "${local.name_prefix}-cost-alert-delivery-failed"
-  alarm_description   = "cost_alert SNS トピックの Lambda 配信失敗"
-  namespace           = "AWS/SNS"
-  metric_name         = "NumberOfNotificationsFailed"
-  dimensions          = { TopicName = aws_sns_topic.cost_alert.name }
-  statistic           = "Sum"
-  period              = 300 # 5 分
-  evaluation_periods  = 1
-  threshold           = 0
-  comparison_operator = "GreaterThanThreshold"
-  treat_missing_data  = "notBreaching"
-  alarm_actions       = [aws_sns_topic.cost_alert.arn]
-
-  tags = {
-    Name = "${local.name_prefix}-cost-alert-delivery-failed-alarm"
-  }
-}
+# ============================================================
+# 注: コスト通知失敗の監視アラームは削除済み
+# ============================================================
+# かつて以下の 2 アラームをゲームごとに作成していたが、ゲーム数に比例して
+# CloudWatch アラーム課金（$0.10/個/月、アカウントで 10 個超から）が積み上がるため削除:
+#   - notify-cost-dlq            (DLQ へのメッセージ到着を検知)
+#   - cost-alert-delivery-failed (SNS→Lambda 配信失敗を検知)
+#
+# これらは「通知パイプラインが壊れたことの見張り役」であり、通知本体ではない。
+# 削除後も Discord/メール通知および暴走コスト防止は以下が担保する:
+#   - AWS Budgets → SNS → notify_cost Lambda → Discord (コスト通知本体)
+#   - cost_guard Lambda のハード停止 (暴走コスト防止)
+#   - alert_email 購読 (メール独立経路・設定時のみ)
+#   - aws_sqs_queue.notify_cost_dlq は残存（手動での配信失敗確認が可能）
+# ============================================================
 
 # メール冗長チャネル: Discord/Lambda が壊れても通知を受け取るための独立経路
 # alert_email が空の場合は作成しない（count による条件付き）

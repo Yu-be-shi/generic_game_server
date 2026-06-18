@@ -290,3 +290,36 @@ variable "aws_region" {
   type        = string
   default     = "ap-northeast-1"
 }
+
+# -----------------------------------------------------------
+# コスト最適化オプション
+# -----------------------------------------------------------
+
+variable "task_cpu_architecture" {
+  description = <<-EOT
+    Fargate タスクの CPU アーキテクチャ。
+    "ARM64" (Graviton) にすると同一性能あたり約 20% コスト削減。
+    !! ゲーム本体の Docker イメージが arm64 に対応している場合のみ変更すること !!
+    ※ モニターサイドカー (amazonlinux:2023) はマルチアーキ対応のため変更不要。
+    既定値 "X86_64" で従来どおりの動作を維持する（後方互換）。
+  EOT
+  type        = string
+  default     = "X86_64"
+
+  validation {
+    condition     = contains(["X86_64", "ARM64"], var.task_cpu_architecture)
+    error_message = "task_cpu_architecture は 'X86_64' または 'ARM64' を指定してください。"
+  }
+}
+
+variable "monitor_image" {
+  description = <<-EOT
+    モニターサイドカーコンテナの Docker イメージ。
+    既定値 "amazonlinux:2023" は起動毎に dnf install を実行する（追加準備不要）。
+    ECR に事前ビルドイメージをプッシュしてその URI を指定すると起動時間を短縮できる。
+    イメージは iproute・python3・aws-cli が含まれている必要がある。
+    ※ task_cpu_architecture="ARM64" の場合はマルチアーキイメージ（または arm64 専用イメージ）を指定すること。
+  EOT
+  type        = string
+  default     = "amazonlinux:2023"
+}

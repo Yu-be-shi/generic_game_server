@@ -73,21 +73,28 @@ echo "[monitor] =========================================="
 # iproute: ss コマンドの提供元
 # aws-cli: aws ecs update-service / aws ssm put-parameter の実行に使用
 # =============================================================================
-echo "[monitor] 依存パッケージをインストール中（初回のみ時間がかかります）..."
-
-if dnf install -y --quiet iproute python3 aws-cli 2>&1; then
-    echo "[monitor] dnf インストール完了"
+# 事前ビルドイメージ（monitor_image に依存パッケージ入りを設定した場合）は
+# すでに aws・ss が存在するためインストールをスキップする。
+# 素の amazonlinux:2023（既定値）の場合は従来どおり dnf でインストールする。
+if command -v aws > /dev/null 2>&1 && command -v ss > /dev/null 2>&1; then
+    echo "[monitor] 依存パッケージは事前インストール済みです。インストールをスキップします。"
 else
-    echo "[monitor] dnf で aws-cli のインストールに失敗。pip3 経由を試みます..."
-    dnf install -y --quiet iproute python3 python3-pip 2>&1
-    pip3 install awscli --quiet
-    echo "[monitor] pip3 インストール完了"
-fi
+    echo "[monitor] 依存パッケージをインストール中（事前ビルドイメージを使うと省略できます）..."
 
-# AWS CLI の動作確認
-if ! command -v aws > /dev/null 2>&1; then
-    echo "[monitor] エラー: AWS CLI が見つかりません。監視を中断します。"
-    exit 1
+    if dnf install -y --quiet iproute python3 aws-cli 2>&1; then
+        echo "[monitor] dnf インストール完了"
+    else
+        echo "[monitor] dnf で aws-cli のインストールに失敗。pip3 経由を試みます..."
+        dnf install -y --quiet iproute python3 python3-pip 2>&1
+        pip3 install awscli --quiet
+        echo "[monitor] pip3 インストール完了"
+    fi
+
+    # AWS CLI の動作確認
+    if ! command -v aws > /dev/null 2>&1; then
+        echo "[monitor] エラー: AWS CLI が見つかりません。監視を中断します。"
+        exit 1
+    fi
 fi
 
 echo "[monitor] セットアップ完了。"
