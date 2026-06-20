@@ -42,7 +42,9 @@ ssm = boto3.client("ssm", region_name=AWS_REGION)
 
 def lambda_handler(event, context):
     """Lambda エントリーポイント"""
-    logger.info("受信イベント: %s", json.dumps(event, ensure_ascii=False))
+    # イベント全文ログは避ける（ECS/SSM イベントにアカウント情報が含まれるため）
+    logger.info("受信イベント: source=%s detail-type=%s",
+                event.get("source"), event.get("detail-type"))
 
     source = event.get("source", "")
     detail = event.get("detail", {})

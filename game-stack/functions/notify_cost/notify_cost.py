@@ -20,7 +20,8 @@ logger.setLevel(logging.INFO)
 
 def lambda_handler(event, context):
     """Lambda エントリーポイント"""
-    logger.info("受信イベント: %s", json.dumps(event, ensure_ascii=False))
+    # イベント全文ログは避ける（SNS メッセージにアカウント ID・コスト情報が含まれるため）
+    logger.info("受信イベント: Records件数=%d", len(event.get("Records", [])))
 
     for record in event.get("Records", []):
         try:

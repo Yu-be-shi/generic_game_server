@@ -80,7 +80,8 @@ def _send_discord(content: str) -> None:
         with urllib.request.urlopen(req, timeout=10) as resp:
             logger.info("Webhook 送信完了 (discord): HTTP %d", resp.status)
     except urllib.error.HTTPError as e:
-        logger.error("Webhook エラー (discord): HTTP %d - %s", e.code, e.read().decode())
+        # レスポンスボディは CloudWatch へのリクエスト内容漏洩を防ぐため記録しない
+        logger.error("Webhook エラー (discord): HTTP %d %s", e.code, e.reason)
         raise
 
 
@@ -108,5 +109,6 @@ def _send_slack(text: str) -> None:
         with urllib.request.urlopen(req, timeout=10) as resp:
             logger.info("Webhook 送信完了 (slack): HTTP %d", resp.status)
     except urllib.error.HTTPError as e:
-        logger.error("Webhook エラー (slack): HTTP %d - %s", e.code, e.read().decode())
+        # レスポンスボディは CloudWatch へのリクエスト内容漏洩を防ぐため記録しない
+        logger.error("Webhook エラー (slack): HTTP %d %s", e.code, e.reason)
         raise
