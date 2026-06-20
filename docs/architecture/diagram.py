@@ -41,7 +41,7 @@ node_attr = {
 with Diagram(
     "Generic Game Server",
     filename="docs/architecture/architecture",
-    outformat="svg",
+    outformat=["svg", "png"],
     show=False,
     direction="TB",
     graph_attr=graph_attr,

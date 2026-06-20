@@ -8,7 +8,7 @@
 
 ## 構成図
 
-![Architecture](docs/architecture/architecture.svg)
+![Architecture](docs/architecture/architecture.png)
 
 再生成: `docs/architecture/.venv/bin/python docs/architecture/diagram.py`（セットアップ詳細: [docs/architecture/README.md](docs/architecture/README.md)）
 
