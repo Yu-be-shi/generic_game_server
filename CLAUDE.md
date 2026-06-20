@@ -6,6 +6,12 @@
 
 オンデマンドのゲームサーバー（Palworld、Minecraft など）をほぼゼロのアイドルコストで運用するための AWS インフラ。制御は Discord スラッシュコマンドのみで行う。Makefile もテストスイートも存在しない — 純粋な Terraform + Python + Bash プロジェクト。
 
+## 構成図
+
+![Architecture](docs/architecture/architecture.png)
+
+再生成: `docs/architecture/.venv/bin/python docs/architecture/diagram.py`（セットアップ詳細: [docs/architecture/README.md](docs/architecture/README.md)）
+
 ## スタック
 
 - **IaC:** Terraform 1.5.6+（`.terraform-version` で強制）
@@ -106,10 +112,53 @@ terraform init -backend-config=backend.hcl
 terraform workspace new palworld          # または: terraform workspace select palworld
 terraform apply -var-file=../games/palworld.tfvars
 
-# ゲームスタックを削除
+# ゲームスタックを削除（⚠ 必ず terraform workspace show で対象を確認してから実行）
+# workspace はゲームごとに state が分離されており他ゲームには影響しない。
+# 共有 VPC（control-plane 管理）は data source 参照のみで game-stack destroy では消えない。
 terraform workspace select palworld
 terraform destroy -var-file=../games/palworld.tfvars
 terraform workspace select default && terraform workspace delete palworld
+```
+
+### ゲームの冬眠（EFS 課金ゼロ化） と 復元
+
+#### 冬眠手順（長期間遊ばないゲームの課金をゼロにする）
+
+```bash
+# 1. S3 バックアップが最新であることを確認（直前に停止 → モニターが自動同期済みのはず）
+aws s3 ls s3://<backup-bucket>/<name-prefix>/ --region ap-northeast-1
+
+# 2. storage.tf の prevent_destroy ブロックを一時的にコメントアウト
+#    （EFS の誤削除防止ガードを外す）
+# game-stack/storage.tf の lifecycle { prevent_destroy = true } をコメントアウト
+
+# 3. 対象 workspace を確認してから destroy
+terraform workspace show  # 必ず確認！
+terraform workspace select <game>
+terraform destroy -var-file=../games/<game>.tfvars
+# → EFS が削除され課金がゼロになる。データは S3 に残存（Glacier IR へ自動降格）。
+
+# 4. storage.tf の prevent_destroy を元に戻す（コミット）
+terraform workspace select default && terraform workspace delete <game>
+```
+
+#### 復元手順（冬眠からの再開 / EFS 再作成後のリストア）
+
+S3 からの復元は同一手順で、冬眠からの復帰・ストレージクラス変更（one_zone ↔ regional）・障害復旧に使い回せる。
+
+```bash
+# 1. terraform apply で空の EFS を再作成
+terraform workspace new <game>  # または select
+terraform apply -var-file=../games/<game>.tfvars
+
+# 2. 一時的な復元タスクで S3 → 新 EFS に同期
+#    既存の backup_efs Lambda の逆処理として手動 aws s3 sync を使う方法:
+#    a) ECS Exec や一時タスクで EFS マウント済みのコンテナを起動
+#    b) aws s3 sync s3://<backup-bucket>/<prefix>/ <efs-mount-path>/ --region ap-northeast-1
+#    例（一時的な復元タスク起動、EFS がマウントされているコンテナ内で実行）:
+aws s3 sync s3://palworld-palworld-backup/palworld-palworld/ /palworld/ --region ap-northeast-1
+
+# 3. 以降は通常どおり Discord /start でゲームサーバーを起動
 ```
 
 ## 手動サーバー操作（Discord が使えない場合）
@@ -142,8 +191,11 @@ aws ssm get-parameters-by-path --path /ggs/palworld-palworld --region ap-northea
    - `"tcp"` — TCP ゲーム（例：Minecraft Java）
    - `"a2s"` — A2S_INFO 対応の Steam ゲーム（汎用 Steam）
    - `"rest"` — Palworld（REST API `/v1/api/players` を使用）
-3. `terraform workspace new <game> && terraform apply -var-file=../games/<game>.tfvars`
-4. コントロールプレーンは ECS クラスターの `Game` タグからゲームを自動検出する — コントロールプレーンの変更は不要。
+3. コスト最適化オプションを決める（コメントアウト済みの設定、後から変更困難なものもある）：
+   - **CPU アーキテクチャ** — ゲームイメージが linux/arm64 を**ネイティブ提供**する場合のみ `task_cpu_architecture = "ARM64"` で約 20% 削減。x86 専用 Steam ゲームには設定しない（box64/FEX エミュレーションは効果相殺・不安定）。確認: `docker manifest inspect <image> | grep -A2 linux/arm64`
+   - **EFS ストレージクラス** — 重要度が低いゲームには `efs_storage_class = "one_zone"` で約 45% 削減。**作成後の変更不可**（変更時は destroy → S3 復元が必要）。regional を選ぶと EFS Archive 自動階層化（90 日）も有効。
+4. `terraform workspace new <game> && terraform apply -var-file=../games/<game>.tfvars`
+5. コントロールプレーンは ECS クラスターの `Game` タグからゲームを自動検出する — コントロールプレーンの変更は不要。
 
 ## 主要設計判断
 
@@ -154,6 +206,8 @@ aws ssm get-parameters-by-path --path /ggs/palworld-palworld --region ap-northea
 - **純粋 Python ed25519:** Lambda レイヤーの複雑さを回避。`ed25519.py` は外部ライブラリなしで署名検証を実装。
 - **共有 notifier モジュール:** `game-stack/functions/_shared/notifier.py` がメッセージング抽象化。`MESSAGING_PROVIDER=slack` を設定し Slack Incoming Webhook URL を `discord_webhook_url` として提供することで Slack に切り替え可能。スラッシュコマンドレスポンスの場合は `control-plane/functions/discord_control/` の `provider.py` も更新する。
 - **コストガードの多層構造:** サイドカーのアイドル検知（ソフト）→ `cost_guard` Lambda のハード停止 → AWS Budgets アラート。3 つの独立した層でコストの暴走を防ぐ。
+- **Palworld は ARM64 非対応（X86_64 のまま）:** Palworld 専用サーバーは SteamCMD 配布の x86_64 バイナリのみで ARM64 ネイティブビルドが存在しない。Graviton で動かすには box64/FEX エミュレーションが必要で、オーバーヘッドが約 20% 削減分を相殺し安定性も低下するため採用しない。ARM64 は `docker manifest inspect` でネイティブ arm64 対応が確認できるゲーム（Minecraft Java 等）にのみ設定する。
+- **EFS ストレージクラスと階層化:** `efs_storage_class = "regional"`（既定）は複数 AZ 冗長 + 30 日 IA 移行 + 90 日 Archive 移行の 3 段階で自動コスト逓減。`"one_zone"` は単一 AZ で約 45% 安だが Archive 非対応で IA 止まり、かつ作成後変更不可。長期間プレイしないゲームは terraform destroy で EFS 課金をゼロにできる（S3 バックアップから復元可能）。
 - **`/update` は update_service ではなく run_task を使用:** auto_update Lambda は `ecs.run_task` で `UPDATE_ON_BOOT=true` を設定した単発タスクを実行する。このタスクのモニターサイドカーは EventBridge 非対象の SSM パラメータ（`update_ready`）とダミーサービス名にリダイレクトされ、余分な IP 通知や誤ったサービス停止を防ぐ。
 
 ## 状態管理
