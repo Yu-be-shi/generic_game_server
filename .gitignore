@@ -36,6 +36,9 @@ games/*.tfvars
 **/*.pyc
 **/*.pyo
 
+# --- diagram-as-code venv（docs/architecture/ 配下）---
+docs/architecture/.venv/
+
 # --- OS / エディタ ---
 .DS_Store
 .idea/

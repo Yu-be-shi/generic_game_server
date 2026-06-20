@@ -48,15 +48,17 @@ variable "task_cpu" {
 variable "task_memory" {
   description = <<-EOT
     Fargate タスクのメモリ (MiB)。
-    許容値: 512 / 1024 / 2048 / 3072 / 4096
-    !! 高額誤デプロイ防止のため 4096 MB (4GB) を上限とする !!
+    許容値: 512 / 1024 / 2048 / 3072 / 4096 / 8192 / 16384
     ※ task_cpu との組み合わせ制約に注意（詳細は task_cpu の説明を参照）
+    コスト目安（ap-northeast-1・起動中のみ課金）:
+      4096 MB → ~$0.129/h（≒ ¥19/h）
+      8192 MB → ~$0.155/h（≒ ¥23/h）
   EOT
   type        = number
 
   validation {
     condition     = contains([512, 1024, 2048, 3072, 4096, 8192, 16384], var.task_memory)
-    error_message = "task_memory は 512, 1024, 2048, 3072, 4096 のいずれかを指定してください。高額誤デプロイ防止のため 4096 MB 以上は設定不可。"
+    error_message = "task_memory は 512, 1024, 2048, 3072, 4096, 8192, 16384 のいずれかを指定してください。"
   }
 }
 
@@ -299,7 +301,11 @@ variable "task_cpu_architecture" {
   description = <<-EOT
     Fargate タスクの CPU アーキテクチャ。
     "ARM64" (Graviton) にすると同一性能あたり約 20% コスト削減。
-    !! ゲーム本体の Docker イメージが arm64 に対応している場合のみ変更すること !!
+    !! ゲーム本体の Docker イメージが arm64 にネイティブ対応している場合のみ変更すること !!
+    !! box64 / FEX 等のエミュレーション経由は削減効果が相殺され安定性も低下するため非推奨 !!
+    確認方法: docker manifest inspect <image> で linux/arm64 がネイティブ対応かを確認。
+    適用例: Minecraft Java 版（JVM はマルチアーキ対応）。
+    非推奨例: Palworld 等の x86 専用 Steam ゲームサーバー（SteamCMD 配布バイナリ）。
     ※ モニターサイドカー (amazonlinux:2023) はマルチアーキ対応のため変更不要。
     既定値 "X86_64" で従来どおりの動作を維持する（後方互換）。
   EOT
@@ -309,6 +315,25 @@ variable "task_cpu_architecture" {
   validation {
     condition     = contains(["X86_64", "ARM64"], var.task_cpu_architecture)
     error_message = "task_cpu_architecture は 'X86_64' または 'ARM64' を指定してください。"
+  }
+}
+
+variable "efs_storage_class" {
+  description = <<-EOT
+    EFS ファイルシステムのストレージクラス（作成時に決定・後から変更不可）。
+    "one_zone": 単一 AZ に配置。Standard の約 45% 安だが、その AZ の障害でアクセス不可。
+      S3 バックアップ（停止前に自動同期）で緩和できる。
+      ECS タスク・バックアップ Lambda も同一 AZ に固定される。
+      !! EFS Archive 階層は Regional 専用のため one_zone 選択時は IA 止まり !!
+      !! 後から変更する場合は terraform destroy → S3 復元が必要（後方変更不可） !!
+    "regional"（既定）: 複数 AZ に冗長配置。Archive 自動階層化も有効。
+  EOT
+  type        = string
+  default     = "regional"
+
+  validation {
+    condition     = contains(["regional", "one_zone"], var.efs_storage_class)
+    error_message = "efs_storage_class は 'regional' または 'one_zone' を指定してください。"
   }
 }
 

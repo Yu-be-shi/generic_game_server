@@ -8,12 +8,28 @@
 resource "aws_efs_file_system" "main" {
   encrypted = true # 保存データを暗号化
 
+  # One Zone 選択時: 指定 AZ の単一ストレージに配置（約 45% 安）
+  # !! 作成後の変更不可 !! 変更時は prevent_destroy を外して destroy → apply → S3 復元が必要
+  # !! efs_storage_class="regional"（既定）では null = 複数 AZ のリージョン冗長を維持 !!
+  availability_zone_name = var.efs_storage_class == "one_zone" ? data.aws_subnet.efs_primary.availability_zone : null
+
   # 30 日間アクセスのないファイルを EFS-IA（低頻度アクセス）ストレージに移行（約 90% 安い）。
   # 次回 ECS タスク起動時に読み出されると自動で標準ストレージへ戻る（AFTER_1_ACCESS）ため
   # 稼働中のゲームプレイへの影響はない。データが小さい（数MB）場合はコスト差も小さい。
   lifecycle_policy {
     transition_to_ia                    = "AFTER_30_DAYS"
     transition_to_primary_storage_class = "AFTER_1_ACCESS"
+  }
+
+  # Regional ファイルシステムのみ: 90 日アクセスのないファイルを EFS Archive へ移行
+  # IA（~$0.027/GB月）よりさらに安い Archive（~$0.008/GB月）。長期間遊ばないゲームのコスト逓減に有効。
+  # !! One Zone では Archive 非対応のため efs_storage_class="one_zone" 時はスキップ !!
+  # !! apply 時に "InvalidParameter" が出た場合はスループットモードを Elastic に変更すること !!
+  dynamic "lifecycle_policy" {
+    for_each = var.efs_storage_class == "regional" ? [1] : []
+    content {
+      transition_to_archive = "AFTER_90_DAYS"
+    }
   }
 
   lifecycle {
@@ -28,14 +44,14 @@ resource "aws_efs_file_system" "main" {
   }
 }
 
-# マウントターゲット（各パブリックサブネットに1つずつ）
+# マウントターゲット（各サブネットに1つずつ）
 # ECS タスクはこのターゲット経由で EFS に接続する
+# regional: 全パブリックサブネット（通常 2 AZ = 2 個）/ one_zone: 単一サブネット（1 個）
 resource "aws_efs_mount_target" "main" {
-  # 共有サブネット数に合わせて動的に count を決定（通常 2 AZ = 2 個）
-  count = length(data.aws_subnets.public.ids)
+  count = length(local.efs_subnets)
 
   file_system_id  = aws_efs_file_system.main.id
-  subnet_id       = data.aws_subnets.public.ids[count.index]
+  subnet_id       = local.efs_subnets[count.index]
   security_groups = [aws_security_group.efs.id]
 }
 

@@ -204,7 +204,9 @@ resource "aws_ecs_service" "game" {
   platform_version = "LATEST"
 
   network_configuration {
-    subnets          = data.aws_subnets.public.ids
+    # one_zone 選択時は EFS と同一 AZ のサブネットに固定（異 AZ だとマウント不可）
+    # regional（既定）は全パブリックサブネット（複数 AZ）= 従来どおり
+    subnets          = local.efs_subnets
     security_groups  = [aws_security_group.game.id]
     assign_public_ip = true # NAT/ALB なしでインターネット通信（固定費ゼロ）
   }

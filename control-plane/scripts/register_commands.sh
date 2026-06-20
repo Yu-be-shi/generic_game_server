@@ -103,14 +103,16 @@ EOF
 )
 
 # Discord API にコマンドを一括登録（PUT = 全置換）
-RESPONSE=$(curl -s -w "\n%{http_code}" \
+# --max-time 30: タイムアウトを設定（一時障害でハングしないよう）
+# head -n-1 は GNU coreutils 固有のため、sed '$d'（POSIX 互換）で最終行を除去する
+RESPONSE=$(curl -s --max-time 30 -w "\n%{http_code}" \
   -X PUT "${ENDPOINT}" \
   -H "Authorization: Bot ${DISCORD_BOT_TOKEN}" \
   -H "Content-Type: application/json" \
   -d "${COMMANDS}")
 
 HTTP_CODE=$(echo "${RESPONSE}" | tail -n1)
-BODY=$(echo "${RESPONSE}" | head -n-1)
+BODY=$(echo "${RESPONSE}" | sed '$d')
 
 if [ "${HTTP_CODE}" = "200" ] || [ "${HTTP_CODE}" = "201" ]; then
   echo "✅ 登録成功（HTTP ${HTTP_CODE}）"

@@ -144,11 +144,15 @@ check_status() {
 
         tcp)
         # TCP 接続数監視（精度高・推奨）
-        _listen=$(ss -tlnH "( sport = :${MONITOR_PORT} )" 2>/dev/null | wc -l | tr -d ' \t')
+        # ※ パイプエラー隠蔽を防ぐため ss 出力を先に変数へ取得してからカウントする
+        #   (sh は pipefail 非対応のため、ss が失敗しても wc -l が 0 を返して成功に見える)
+        _ss_listen_out=$(ss -tlnH "( sport = :${MONITOR_PORT} )" 2>/dev/null || true)
+        _listen=$(printf '%s\n' "${_ss_listen_out}" | grep -c . || true)
         if [ "${_listen:-0}" -gt 0 ] 2>/dev/null; then
             _ready=1
         fi
-        conn_count=$(ss -tnH state established "( sport = :${MONITOR_PORT} )" 2>/dev/null | wc -l | tr -d ' \t')
+        _ss_conn_out=$(ss -tnH state established "( sport = :${MONITOR_PORT} )" 2>/dev/null || true)
+        conn_count=$(printf '%s\n' "${_ss_conn_out}" | grep -c . || true)
         ;;
 
         a2s)
@@ -279,8 +283,15 @@ write_buildid() {
     [ -z "${STEAM_APP_ID:-}" ]  && return 0
     [ -z "${BUILDID_PARAM:-}" ] && return 0
 
+    # EFS_MOUNT_PATH が未設定またはマウントされていない場合は安全のためスキップ
+    # （未設定のまま find を実行すると find / でルート全探索になる危険がある）
+    if [ -z "${EFS_MOUNT_PATH:-}" ] || [ ! -d "${EFS_MOUNT_PATH}" ]; then
+        echo "[monitor] 警告: write_buildid スキップ: EFS_MOUNT_PATH が未設定またはディレクトリが存在しません (${EFS_MOUNT_PATH:-<未設定>})"
+        return 0
+    fi
+
     local manifest
-    manifest=$(find "${EFS_MOUNT_PATH:-/}" \
+    manifest=$(find "${EFS_MOUNT_PATH}" \
         -name "appmanifest_${STEAM_APP_ID}.acf" 2>/dev/null | head -n1)
 
     if [ -z "${manifest}" ]; then
@@ -326,14 +337,20 @@ do_shutdown() {
     echo "[monitor] ========================================"
 
     if [ -n "${BACKUP_BUCKET:-}" ]; then
-        echo "[monitor] 停止前バックアップ開始: ${EFS_MOUNT_PATH} -> s3://${BACKUP_BUCKET}/${BACKUP_PREFIX}/"
-        if aws s3 sync "${EFS_MOUNT_PATH}/" "s3://${BACKUP_BUCKET}/${BACKUP_PREFIX}/" \
-            --region "${AWS_REGION}" \
-            --no-progress \
-            2>&1; then
-            echo "[monitor] バックアップ完了"
+        # EFS_MOUNT_PATH が未設定またはマウントされていない場合はバックアップをスキップ
+        # （未検証のまま s3 sync を実行すると aws s3 sync "/" ... でルート全体を同期する危険がある）
+        if [ -z "${EFS_MOUNT_PATH:-}" ] || [ ! -d "${EFS_MOUNT_PATH}" ]; then
+            echo "[monitor] 警告: EFS_MOUNT_PATH が未設定またはマウントされていません (${EFS_MOUNT_PATH:-<未設定>})。バックアップをスキップします。停止処理は継続します。"
         else
-            echo "[monitor] 警告: バックアップ同期に失敗しました。停止処理は継続します。"
+            echo "[monitor] 停止前バックアップ開始: ${EFS_MOUNT_PATH} -> s3://${BACKUP_BUCKET}/${BACKUP_PREFIX}/"
+            if aws s3 sync "${EFS_MOUNT_PATH}/" "s3://${BACKUP_BUCKET}/${BACKUP_PREFIX}/" \
+                --region "${AWS_REGION}" \
+                --no-progress \
+                2>&1; then
+                echo "[monitor] バックアップ完了"
+            else
+                echo "[monitor] 警告: バックアップ同期に失敗しました。停止処理は継続します。"
+            fi
         fi
     fi
 
@@ -413,11 +430,16 @@ while true; do
     check_status
     write_players
 
+    # conn_count が非数値の場合（想定外の check_status 出力）は 0 として扱い安全側に倒す
+    case "${conn_count:-0}" in
+        ''|*[!0-9-]*) conn_count=0 ;;  # 非数値 → 0 に正規化
+    esac
+
     if [ "${conn_count}" = "-1" ]; then
         # REST API 認証エラー等 → プレイヤー数不明。カウンタ変更なし
         echo "[monitor] 警告: プレイヤー数が不明（REST API 認証エラー？ADMIN_PASSWORD を確認）。アイドルカウンタを変更しません。"
 
-    elif [ "${conn_count}" -gt 0 ] 2>/dev/null; then
+    elif [ "${conn_count}" -gt 0 ]; then
         # 接続あり → アイドルカウンタをリセット
         if [ "${idle_seconds}" -gt 0 ]; then
             echo "[monitor] プレイヤーを検知。アイドルカウンタをリセット（接続数: ${conn_count}）"

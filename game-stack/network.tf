@@ -41,6 +41,12 @@ data "aws_subnets" "public" {
   }
 }
 
+# One Zone EFS 用: パブリックサブネットのうち最初の 1 つ（sort で決定論的）の AZ を取得。
+# efs_storage_class="regional" のときも data source は評価されるが、追加 API コールは軽微。
+data "aws_subnet" "efs_primary" {
+  id = sort(data.aws_subnets.public.ids)[0]
+}
+
 # -----------------------------------------------------------
 # ローカル変数
 # -----------------------------------------------------------
@@ -51,6 +57,11 @@ locals {
   name_prefix  = "${var.game_name}-${terraform.workspace}"
   cluster_name = "${local.name_prefix}-cluster"
   service_name = "${local.name_prefix}-service"
+
+  # EFS・ECS・バックアップ Lambda の配置先サブネット
+  # regional（既定）: 全パブリックサブネット（複数 AZ）
+  # one_zone: sort した先頭サブネット 1 つに固定（EFS マウントターゲットと同一 AZ が必須）
+  efs_subnets = var.efs_storage_class == "one_zone" ? [sort(data.aws_subnets.public.ids)[0]] : data.aws_subnets.public.ids
 }
 
 # -----------------------------------------------------------

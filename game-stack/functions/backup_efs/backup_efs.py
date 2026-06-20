@@ -151,8 +151,20 @@ def restore_handler(event, context):
       - サーバーは DedicatedServerName（=OLD_GUID のフォルダ名）でワールドを参照する
       - フォルダ名を変えず中身を差し替えることで GameUserSettings.ini の編集が不要になる
     """
-    s3_key = event.get("s3_key", "save.zip")
-    source_world = event.get("source_world", "1D01670C455B39AD23DC8B8B6F1969CB")
+    # s3_key と source_world は必須。デフォルト値を設けない（デフォルトがあると
+    # 引数なし誤 invoke で _clear_directory が実行されてデータが消える危険がある）
+    s3_key = event.get("s3_key")
+    source_world = event.get("source_world")
+    if not s3_key:
+        raise ValueError(
+            "restore アクションには 's3_key' フィールドが必要です。"
+            "例: {\"action\": \"restore\", \"s3_key\": \"save.zip\", \"source_world\": \"<GUID>\"}"
+        )
+    if not source_world:
+        raise ValueError(
+            "restore アクションには 'source_world' フィールドが必要です。"
+            "例: {\"action\": \"restore\", \"s3_key\": \"save.zip\", \"source_world\": \"<GUID>\"}"
+        )
     # context.aws_request_id をスナップショットのユニーク ID として使用
     exec_id = context.aws_request_id
 
@@ -311,8 +323,18 @@ def _extract_world(
                 stats["skipped"] += 1
                 continue
 
-            # 展開先パスを構築して書き出す
+            # 展開先パスを構築する
             dest_path = dest_dir / relative
+
+            # Zip-Slip 対策: 展開先が dest_dir 配下であることを検証する
+            # 悪意ある zip（"../../etc/passwd" 等）によるパストラバーサルを防ぐ
+            try:
+                dest_path.resolve().relative_to(dest_dir.resolve())
+            except ValueError:
+                logger.warning("パストラバーサルを検出してスキップ: %s", relative)
+                stats["skipped"] += 1
+                continue
+
             dest_path.parent.mkdir(parents=True, exist_ok=True)
             dest_path.write_bytes(zf.read(member.filename))
             logger.info("展開: %s -> %s", relative, dest_path)

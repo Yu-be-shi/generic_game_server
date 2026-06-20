@@ -74,7 +74,17 @@ STATUS_READY_GRACE_SECONDS = 60
 # =============================================================================
 
 def lambda_handler(event: dict, context) -> dict:
-    logger.info("Event: %s", json.dumps(event))
+    # イベント全文のログ出力は避ける（Discord ヘッダーに署名・機密が含まれるため）
+    # デバッグが必要な場合は環境変数 LOG_LEVEL=DEBUG に変更してから確認すること
+    logger.debug("Event: %s", json.dumps(event))
+    logger.info("Lambda invoked: requestContext.requestId=%s",
+                event.get("requestContext", {}).get("requestId", "deferred"))
+
+    # --- deferred ワーカーモード（自己非同期 invoke から呼ばれる）---
+    # Discord からの HTTP リクエストではなく内部 JSON ペイロードのため、
+    # 署名検証をスキップして直接コマンドを実行し、フォローアップ Webhook で結果を返す。
+    if event.get("ggs_deferred"):
+        return _handle_deferred_worker(event)
 
     provider = get_provider()
 
@@ -105,10 +115,59 @@ def lambda_handler(event: dict, context) -> dict:
     if req.kind == "command":
         if ALLOWED_USER_IDS and req.user_id not in ALLOWED_USER_IDS:
             return provider.message("⛔ このボットを操作する権限がありません。")
-        text = _dispatch_command(req.command, req.options)
-        return provider.message(text)
+        # 重い AWS API 呼び出しを自己非同期 invoke に移譲し、3 秒以内に deferred を返す。
+        # ワーカーが処理後に send_followup() で「考え中…」を結果に上書きする。
+        try:
+            lambda_client.invoke(
+                FunctionName=context.function_name,
+                InvocationType="Event",  # 非同期: StatusCode=202 → すぐに返る
+                Payload=json.dumps({
+                    "ggs_deferred": True,
+                    "command":      req.command,
+                    "options":      req.options,
+                    "app_id":       req.app_id,
+                    "token":        req.token,
+                }).encode("utf-8"),
+            )
+            logger.info("deferred ワーカーを非同期 invoke: command=%s", req.command)
+        except Exception:
+            logger.exception("deferred ワーカーの invoke に失敗: command=%s", req.command)
+            return provider.message("❌ コマンド処理の開始に失敗しました。しばらく後に再試行してください。")
+        return provider.deferred_response()
 
     return provider.message("不明なリクエストタイプです。")
+
+
+# =============================================================================
+# Deferred ワーカー
+# =============================================================================
+
+def _handle_deferred_worker(event: dict) -> dict:
+    """
+    deferred モードのワーカー実行。
+    自己非同期 invoke（InvocationType="Event"）で呼ばれ、
+    コマンドを実行して Discord フォローアップ Webhook で「考え中…」を結果に上書きする。
+    例外が発生してもエラー文言を必ずフォローアップ送信し、「考え中…」放置を防ぐ。
+    """
+    provider = get_provider()
+    app_id   = event.get("app_id", "")
+    token    = event.get("token", "")
+    command  = event.get("command", "")
+    options  = event.get("options", {})
+
+    logger.info("deferred ワーカー起動: command=%s options=%s", command, options)
+    try:
+        text = _dispatch_command(command, options)
+    except Exception:
+        logger.exception("deferred ワーカー: コマンド実行失敗: command=%s", command)
+        text = "❌ コマンド実行中にエラーが発生しました。しばらく後に再試行してください。"
+
+    try:
+        provider.send_followup(app_id, token, text)
+    except Exception:
+        logger.exception("deferred ワーカー: フォローアップ送信失敗: app_id=%s", app_id)
+
+    return {"statusCode": 200}
 
 
 # =============================================================================
@@ -656,9 +715,11 @@ def _get_running_task_info(cluster_arn: str):
         task_arn     = task.get("taskArn")
 
         # attachments から ENI ID を探す
+        # type は "ElasticNetworkInterface" または "eni"（API バージョンにより異なる）
+        # notify_ip.py と同じ判定ロジックに統一して /status の IP 取得漏れを防ぐ
         eni_id = None
         for attachment in task.get("attachments", []):
-            if attachment.get("type") != "ElasticNetworkInterface":
+            if attachment.get("type") not in ("ElasticNetworkInterface", "eni"):
                 continue
             for detail in attachment.get("details", []):
                 if detail.get("name") == "networkInterfaceId":

@@ -246,8 +246,10 @@ resource "aws_lambda_function" "backup_efs" {
   }
 
   # VPC 内に配置（EFS と S3 Gateway Endpoint に到達するため）
+  # one_zone 選択時は EFS と同一 AZ のサブネットに固定（異 AZ だと EFS マウント不可）
+  # regional（既定）は全パブリックサブネット = 従来どおり
   vpc_config {
-    subnet_ids         = data.aws_subnets.public.ids
+    subnet_ids         = local.efs_subnets
     security_group_ids = [aws_security_group.backup_lambda.id]
   }
 
@@ -258,10 +260,10 @@ resource "aws_lambda_function" "backup_efs" {
     }
   }
 
-  # EFS マウントターゲットと VPC Endpoint が準備できてから作成する
+  # EFS マウントターゲットが準備できてから作成する
+  # S3 VPC Endpoint は control-plane/network.tf に移設済みのため参照不要
   depends_on = [
     aws_efs_mount_target.main,
-    aws_vpc_endpoint.s3,
     aws_cloudwatch_log_group.backup_lambda,
     aws_iam_role_policy_attachment.backup_lambda_vpc,
   ]

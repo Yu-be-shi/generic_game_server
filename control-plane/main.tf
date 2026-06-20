@@ -2,10 +2,13 @@
 # main.tf - Discord コントロールプレーン
 # ============================================================
 # 構成（固定費ゼロ）:
-#   Lambda Function URL ← Discord がスラッシュコマンドを POST
-#   Lambda → ECS API でゲームサーバーを制御（/start /stop /status /games）
+#   API Gateway v2 HTTP API ← Discord がスラッシュコマンドを POST
+#   API Gateway → Lambda → ECS API でゲームサーバーを制御
+#   （/games /start /stop /status /cost /update の 6 コマンド）
 #
-# Function URL は API Gateway 不要で追加コストゼロ。
+# Lambda Function URL はアカウントレベルのパブリックアクセスブロックの無効化が
+# 必要で S3 に影響するため不使用。API Gateway v2 HTTP API は同じコストプロファイル
+#（固定費なし・リクエスト従量課金）で Lambda Function URL と実質同等。
 # Ed25519 署名検証（index.py + ed25519.py）で Discord 以外の呼び出しを弾く。
 
 data "aws_caller_identity" "current" {}
@@ -138,6 +141,15 @@ resource "aws_iam_role_policy" "discord_control" {
         Effect   = "Allow"
         Action   = ["lambda:InvokeFunction"]
         Resource = "arn:aws:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:function:*-auto-update"
+      },
+      {
+        # deferred response: 自分自身を非同期 invoke してコマンドをワーカー実行する。
+        # 関数名は local.function_name で固定し、ワイルドカードを使わない。
+        # 循環依存を避けるため aws_lambda_function リソース参照ではなく ARN を直接構成する。
+        Sid      = "InvokeSelf"
+        Effect   = "Allow"
+        Action   = ["lambda:InvokeFunction"]
+        Resource = "arn:aws:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:function:${local.function_name}"
       }
     ]
   })
@@ -169,7 +181,12 @@ resource "aws_lambda_function" "discord_control" {
   source_code_hash = data.archive_file.discord_control.output_base64sha256
 
   # Discord の3秒制限に十分な余裕を持たせる
+  # deferred ワーカー（自己 invoke）は重い AWS API 呼び出しを担うため余裕を持たせる
   timeout = 10
+
+  # 実測 Max Memory Used: 110 MB / 128 MB（残り 18 MB）。OOM 余裕確保と
+  # コールドスタート短縮（CPU 割当はメモリに比例）のため 256 MB に引き上げる。
+  memory_size = 256
 
   # Graviton (arm64) で実行（純 Python のため無改修で約 20% コスト削減）
   architectures = ["arm64"]

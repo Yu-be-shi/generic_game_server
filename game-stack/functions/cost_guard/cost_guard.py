@@ -24,7 +24,10 @@ from notifier import send_message
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-ecs = boto3.client("ecs")
+# 他の Lambda と同様に region_name を明示してクライアントを初期化する
+# （環境変数 AWS_REGION は Lambda ランタイムが自動注入する）
+AWS_REGION = os.environ.get("AWS_REGION", "ap-northeast-1")
+ecs = boto3.client("ecs", region_name=AWS_REGION)
 
 
 def lambda_handler(event, context):

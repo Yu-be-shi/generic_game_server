@@ -7,12 +7,9 @@ terraform {
 
   # backend の詳細設定は backend.hcl で渡す（アカウント固有情報をコードから分離）
   # 初回セットアップ: backend.hcl.example をコピーして bucket 名を記入し
-  # terraform init -migrate-state -backend-config=backend.hcl を実行する
-  backend "s3" {
-    bucket = "yubeshi-game-server-terraform-state"
-    key    = "control-plane/terraform.tfstate"
-    region = "ap-northeast-1"
-  }
+  # terraform init -backend-config=backend.hcl を実行する
+  # 既存の local state から移行する場合: terraform init -migrate-state -backend-config=backend.hcl
+  backend "s3" {}
 
   required_providers {
     aws = {
