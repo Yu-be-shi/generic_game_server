@@ -150,10 +150,39 @@ data "archive_file" "backup_efs" {
   type        = "zip"
   output_path = "${path.module}/functions/backup_efs/backup_efs.zip"
 
-  # ハンドラ本体 + 共有 ssm_params モジュールを同梱
+  # ハンドラ本体（アクション単位・責務単位に分割された bf_*.py 群）
+  # + 共有 ssm_params モジュールを同梱
   source {
     content  = file("${path.module}/functions/backup_efs/backup_efs.py")
     filename = "backup_efs.py"
+  }
+  source {
+    content  = file("${path.module}/functions/backup_efs/bf_config.py")
+    filename = "bf_config.py"
+  }
+  source {
+    content  = file("${path.module}/functions/backup_efs/bf_storage.py")
+    filename = "bf_storage.py"
+  }
+  source {
+    content  = file("${path.module}/functions/backup_efs/bf_palworld.py")
+    filename = "bf_palworld.py"
+  }
+  source {
+    content  = file("${path.module}/functions/backup_efs/bf_backup.py")
+    filename = "bf_backup.py"
+  }
+  source {
+    content  = file("${path.module}/functions/backup_efs/bf_restore.py")
+    filename = "bf_restore.py"
+  }
+  source {
+    content  = file("${path.module}/functions/backup_efs/bf_restore_all.py")
+    filename = "bf_restore_all.py"
+  }
+  source {
+    content  = file("${path.module}/functions/backup_efs/bf_switch_slot.py")
+    filename = "bf_switch_slot.py"
   }
   source {
     content  = file("${path.module}/functions/_shared/ssm_params.py")
