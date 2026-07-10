@@ -40,405 +40,405 @@
 <path fill="#ebf3e7" stroke="#aeb6be" d="M2385,-84.2C2385,-84.2 2638,-84.2 2638,-84.2 2644,-84.2 2650,-90.2 2650,-96.2 2650,-96.2 2650,-2025.95 2650,-2025.95 2650,-2031.95 2644,-2037.95 2638,-2037.95 2638,-2037.95 2385,-2037.95 2385,-2037.95 2379,-2037.95 2373,-2031.95 2373,-2025.95 2373,-2025.95 2373,-96.2 2373,-96.2 2373,-90.2 2379,-84.2 2385,-84.2"/>
 <text text-anchor="middle" x="2419.5" y="-2024.35" font-family="Sans-Serif" font-size="12.00" fill="#2d3436">Cost Alerting</text>
 </g>
-<!-- f6ce4b43982f4eb2a52307449d87b82e -->
+<!-- 8244a2d765224d6f8962c8b58b0ade20 -->
 <g id="node1" class="node">
-<title>f6ce4b43982f4eb2a52307449d87b82e</title>
+<title>8244a2d765224d6f8962c8b58b0ade20</title>
 <image xlink:href="/home/yubeshi/workspaces/generic_game_server/docs/architecture/.venv/lib/python3.12/site-packages/resources/onprem/client/users.png" width="101px" height="101px" preserveAspectRatio="xMinYMin meet" x="2671.5" y="-265.133"/>
 <text text-anchor="middle" x="2722" y="-145.63" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3436">Discord</text>
 <text text-anchor="middle" x="2722" y="-134.63" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3436">(slash commands)</text>
 </g>
-<!-- d517777e3c6d467cb5f1754d76d29acc -->
+<!-- 502c8b7094e44505ae643f811eaa2d23 -->
 <g id="node3" class="node">
-<title>d517777e3c6d467cb5f1754d76d29acc</title>
+<title>502c8b7094e44505ae643f811eaa2d23</title>
 <image xlink:href="/home/yubeshi/workspaces/generic_game_server/docs/architecture/.venv/lib/python3.12/site-packages/resources/aws/network/api-gateway.png" width="101px" height="101px" preserveAspectRatio="xMinYMin meet" x="175.5" y="-1897.13"/>
 <text text-anchor="middle" x="226" y="-1777.63" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3436">API Gateway v2</text>
 <text text-anchor="middle" x="226" y="-1766.63" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3436">HTTP API &#160;POST /</text>
 </g>
-<!-- f6ce4b43982f4eb2a52307449d87b82e&#45;&gt;d517777e3c6d467cb5f1754d76d29acc -->
+<!-- 8244a2d765224d6f8962c8b58b0ade20&#45;&gt;502c8b7094e44505ae643f811eaa2d23 -->
 <g id="edge1" class="edge">
-<title>f6ce4b43982f4eb2a52307449d87b82e&#45;&gt;d517777e3c6d467cb5f1754d76d29acc</title>
+<title>8244a2d765224d6f8962c8b58b0ade20&#45;&gt;502c8b7094e44505ae643f811eaa2d23</title>
 <path fill="none" stroke="#7b8894" d="M276.64,-1770.47C1032.39,-634.4 1075.7,-612.12 2661.51,-229.23"/>
 <polygon fill="#7b8894" stroke="#7b8894" points="2662.52,-232.59 2671.42,-226.84 2660.88,-225.79 2662.52,-232.59"/>
 </g>
-<!-- dabb07c3556844e1a0ee114b1026a1da -->
+<!-- 7dfe3843db514dd88f8eb9d54241f7e2 -->
 <g id="node2" class="node">
-<title>dabb07c3556844e1a0ee114b1026a1da</title>
+<title>7dfe3843db514dd88f8eb9d54241f7e2</title>
 <image xlink:href="/home/yubeshi/workspaces/generic_game_server/docs/architecture/.venv/lib/python3.12/site-packages/resources/onprem/client/client.png" width="101px" height="101px" preserveAspectRatio="xMinYMin meet" x="1088.5" y="-1369.13"/>
 <text text-anchor="middle" x="1139" y="-1249.63" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3436">Players</text>
 <text text-anchor="middle" x="1139" y="-1238.63" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3436">(game clients)</text>
 </g>
-<!-- c69bb8d7ba9948d9907d8048b1385391 -->
+<!-- 091cefc3854d4db397daa7d42e09fdb5 -->
 <g id="node13" class="node">
-<title>c69bb8d7ba9948d9907d8048b1385391</title>
+<title>091cefc3854d4db397daa7d42e09fdb5</title>
 <image xlink:href="/home/yubeshi/workspaces/generic_game_server/docs/architecture/.venv/lib/python3.12/site-packages/resources/aws/compute/fargate.png" width="101px" height="101px" preserveAspectRatio="xMinYMin meet" x="1884.5" y="-817.133"/>
 <text text-anchor="middle" x="1935" y="-697.63" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3436">game container</text>
 <text text-anchor="middle" x="1935" y="-686.63" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3436">[essential=true]</text>
 </g>
-<!-- dabb07c3556844e1a0ee114b1026a1da&#45;&gt;c69bb8d7ba9948d9907d8048b1385391 -->
+<!-- 7dfe3843db514dd88f8eb9d54241f7e2&#45;&gt;091cefc3854d4db397daa7d42e09fdb5 -->
 <g id="edge25" class="edge">
-<title>dabb07c3556844e1a0ee114b1026a1da&#45;&gt;c69bb8d7ba9948d9907d8048b1385391</title>
+<title>7dfe3843db514dd88f8eb9d54241f7e2&#45;&gt;091cefc3854d4db397daa7d42e09fdb5</title>
 <path fill="none" stroke="#7b8894" d="M1189.78,-1292.81C1672.94,-1047.08 1728.23,-1015.57 1877.84,-836.18"/>
 <polygon fill="#7b8894" stroke="#7b8894" points="1880.64,-838.28 1884.34,-828.36 1875.26,-833.81 1880.64,-838.28"/>
 <text text-anchor="middle" x="1193.5" y="-1046.23" font-family="Sans-Serif" font-size="13.00" fill="#2d3436">game port</text>
 <text text-anchor="middle" x="1193.5" y="-1032.23" font-family="Sans-Serif" font-size="13.00" fill="#2d3436">[direct public IP]</text>
 </g>
-<!-- c46c221547e84d3697a0e0b24c541e0f -->
+<!-- 87dd2a4d38634783b378207bb4710d85 -->
 <g id="node4" class="node">
-<title>c46c221547e84d3697a0e0b24c541e0f</title>
+<title>87dd2a4d38634783b378207bb4710d85</title>
 <image xlink:href="/home/yubeshi/workspaces/generic_game_server/docs/architecture/.venv/lib/python3.12/site-packages/resources/aws/compute/lambda.png" width="101px" height="101px" preserveAspectRatio="xMinYMin meet" x="810.5" y="-1369.13"/>
 <text text-anchor="middle" x="861" y="-1246.63" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3436">discord_control</text>
 <text text-anchor="middle" x="861" y="-1235.63" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3436">python3.12 / arm64</text>
 <text text-anchor="middle" x="861" y="-1224.63" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3436">ed25519 verify</text>
 </g>
-<!-- d517777e3c6d467cb5f1754d76d29acc&#45;&gt;c46c221547e84d3697a0e0b24c541e0f -->
+<!-- 502c8b7094e44505ae643f811eaa2d23&#45;&gt;87dd2a4d38634783b378207bb4710d85 -->
 <g id="edge2" class="edge">
-<title>d517777e3c6d467cb5f1754d76d29acc&#45;&gt;c46c221547e84d3697a0e0b24c541e0f</title>
+<title>502c8b7094e44505ae643f811eaa2d23&#45;&gt;87dd2a4d38634783b378207bb4710d85</title>
 <path fill="none" stroke="#7b8894" d="M276.58,-1779.83C387.07,-1636.43 436.74,-1600.06 801.98,-1357.77"/>
 <polygon fill="#7b8894" stroke="#7b8894" points="803.99,-1360.63 810.39,-1352.19 800.12,-1354.8 803.99,-1360.63"/>
 </g>
-<!-- 2c3daa991561429ca91599774a7e2e21 -->
+<!-- 9a1c49bc588943e994655fe5242ef129 -->
 <g id="node11" class="node">
-<title>2c3daa991561429ca91599774a7e2e21</title>
+<title>9a1c49bc588943e994655fe5242ef129</title>
 <image xlink:href="/home/yubeshi/workspaces/generic_game_server/docs/architecture/.venv/lib/python3.12/site-packages/resources/aws/management/systems-manager-parameter-store.png" width="101px" height="101px" preserveAspectRatio="xMinYMin meet" x="1554.5" y="-1897.13"/>
 <text text-anchor="middle" x="1605" y="-1774.63" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3436">/ggs/&lt;prefix&gt;/*</text>
 <text text-anchor="middle" x="1605" y="-1763.63" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3436">ready / players</text>
 <text text-anchor="middle" x="1605" y="-1752.63" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3436">maintenance / buildid</text>
 </g>
-<!-- c46c221547e84d3697a0e0b24c541e0f&#45;&gt;2c3daa991561429ca91599774a7e2e21 -->
+<!-- 87dd2a4d38634783b378207bb4710d85&#45;&gt;9a1c49bc588943e994655fe5242ef129 -->
 <g id="edge4" class="edge">
-<title>c46c221547e84d3697a0e0b24c541e0f&#45;&gt;2c3daa991561429ca91599774a7e2e21</title>
+<title>87dd2a4d38634783b378207bb4710d85&#45;&gt;9a1c49bc588943e994655fe5242ef129</title>
 <path fill="none" stroke="#7b8894" d="M1554.2,-1831.99C1134.18,-1710.71 1089.72,-1689.32 917.07,-1410.31"/>
 <polygon fill="#7b8894" stroke="#7b8894" points="919.9,-1408.22 911.67,-1401.55 913.94,-1411.9 919.9,-1408.22"/>
 <text text-anchor="middle" x="846" y="-1579.23" font-family="Sans-Serif" font-size="13.00" fill="#2d3436">/status</text>
 </g>
-<!-- f35d8bd1c5dd429a9119a91c91660265 -->
+<!-- 82a561ffd91441a0990f9669b044e6f9 -->
 <g id="node12" class="node">
-<title>f35d8bd1c5dd429a9119a91c91660265</title>
+<title>82a561ffd91441a0990f9669b044e6f9</title>
 <image xlink:href="/home/yubeshi/workspaces/generic_game_server/docs/architecture/.venv/lib/python3.12/site-packages/resources/aws/compute/elastic-container-service.png" width="101px" height="101px" preserveAspectRatio="xMinYMin meet" x="1852.5" y="-265.133"/>
 <text text-anchor="middle" x="1903" y="-145.63" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3436">ECS Service</text>
 <text text-anchor="middle" x="1903" y="-134.63" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3436">desired_count &#160;0 &lt;&#45;&gt; 1</text>
 </g>
-<!-- c46c221547e84d3697a0e0b24c541e0f&#45;&gt;f35d8bd1c5dd429a9119a91c91660265 -->
+<!-- 87dd2a4d38634783b378207bb4710d85&#45;&gt;82a561ffd91441a0990f9669b044e6f9 -->
 <g id="edge3" class="edge">
-<title>c46c221547e84d3697a0e0b24c541e0f&#45;&gt;f35d8bd1c5dd429a9119a91c91660265</title>
+<title>87dd2a4d38634783b378207bb4710d85&#45;&gt;82a561ffd91441a0990f9669b044e6f9</title>
 <path fill="none" stroke="#7b8894" d="M896.68,-1221.46C1114.43,-631.05 1154.51,-597.52 1843.56,-245.02"/>
 <polygon fill="#7b8894" stroke="#7b8894" points="1845.15,-248.14 1852.46,-240.47 1841.97,-241.9 1845.15,-248.14"/>
 <text text-anchor="middle" x="537.5" y="-763.23" font-family="Sans-Serif" font-size="13.00" fill="#2d3436">/start /stop</text>
 </g>
-<!-- 1c90ec266d6d407e98fa63a990188c14 -->
+<!-- a5084bd1e45f4323a2a72c8621a5827e -->
 <g id="node18" class="node">
-<title>1c90ec266d6d407e98fa63a990188c14</title>
+<title>a5084bd1e45f4323a2a72c8621a5827e</title>
 <image xlink:href="/home/yubeshi/workspaces/generic_game_server/docs/architecture/.venv/lib/python3.12/site-packages/resources/aws/compute/lambda.png" width="101px" height="101px" preserveAspectRatio="xMinYMin meet" x="1518.5" y="-817.133"/>
 <text text-anchor="middle" x="1569" y="-701.13" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3436">auto_update</text>
 </g>
-<!-- c46c221547e84d3697a0e0b24c541e0f&#45;&gt;1c90ec266d6d407e98fa63a990188c14 -->
+<!-- 87dd2a4d38634783b378207bb4710d85&#45;&gt;a5084bd1e45f4323a2a72c8621a5827e -->
 <g id="edge6" class="edge">
-<title>c46c221547e84d3697a0e0b24c541e0f&#45;&gt;1c90ec266d6d407e98fa63a990188c14</title>
+<title>87dd2a4d38634783b378207bb4710d85&#45;&gt;a5084bd1e45f4323a2a72c8621a5827e</title>
 <path fill="none" stroke="#7b8894" d="M911.56,-1254.46C1041.03,-1092.32 1091.08,-1058.18 1509.64,-802.83"/>
 <polygon fill="#7b8894" stroke="#7b8894" points="1511.62,-805.72 1518.34,-797.53 1507.98,-799.75 1511.62,-805.72"/>
 <text text-anchor="middle" x="685" y="-1039.23" font-family="Sans-Serif" font-size="13.00" fill="#2d3436">/update</text>
 </g>
-<!-- ee4fada03a854395ad8c59622ba6aabc -->
+<!-- 9abf8c7e647548f194984df7249882e5 -->
 <g id="node26" class="node">
-<title>ee4fada03a854395ad8c59622ba6aabc</title>
+<title>9abf8c7e647548f194984df7249882e5</title>
 <image xlink:href="/home/yubeshi/workspaces/generic_game_server/docs/architecture/.venv/lib/python3.12/site-packages/resources/aws/cost/cost-explorer.png" width="101px" height="101px" preserveAspectRatio="xMinYMin meet" x="2381.5" y="-1897.13"/>
 <text text-anchor="middle" x="2432" y="-1781.13" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3436">Cost Explorer</text>
 </g>
-<!-- c46c221547e84d3697a0e0b24c541e0f&#45;&gt;ee4fada03a854395ad8c59622ba6aabc -->
+<!-- 87dd2a4d38634783b378207bb4710d85&#45;&gt;9abf8c7e647548f194984df7249882e5 -->
 <g id="edge5" class="edge">
-<title>c46c221547e84d3697a0e0b24c541e0f&#45;&gt;ee4fada03a854395ad8c59622ba6aabc</title>
+<title>87dd2a4d38634783b378207bb4710d85&#45;&gt;9abf8c7e647548f194984df7249882e5</title>
 <path fill="none" stroke="#7b8894" d="M2381.16,-1849.22C1807,-1878.1 1770.48,-1864.51 920.46,-1354.33"/>
 <polygon fill="#7b8894" stroke="#7b8894" points="922.06,-1351.21 911.68,-1349.06 918.46,-1357.21 922.06,-1351.21"/>
 <text text-anchor="middle" x="948.5" y="-1579.23" font-family="Sans-Serif" font-size="13.00" fill="#2d3436">/cost</text>
 </g>
-<!-- 90372bce7bea42f5966d882cbe75ee62 -->
+<!-- 1ea99be524af4d73be8ddfa1b84c68e1 -->
 <g id="node5" class="node">
-<title>90372bce7bea42f5966d882cbe75ee62</title>
+<title>1ea99be524af4d73be8ddfa1b84c68e1</title>
 <image xlink:href="/home/yubeshi/workspaces/generic_game_server/docs/architecture/.venv/lib/python3.12/site-packages/resources/aws/compute/ec2-container-registry.png" width="101px" height="101px" preserveAspectRatio="xMinYMin meet" x="970.5" y="-1897.13"/>
 <text text-anchor="middle" x="1021" y="-1777.63" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3436">ECR</text>
 <text text-anchor="middle" x="1021" y="-1766.63" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3436">ggs&#45;monitor image</text>
 </g>
-<!-- 6c614aaf4de74b36b2b4b624cd874299 -->
+<!-- 77e566e95f394a05823f3141724f05c4 -->
 <g id="node14" class="node">
-<title>6c614aaf4de74b36b2b4b624cd874299</title>
+<title>77e566e95f394a05823f3141724f05c4</title>
 <image xlink:href="/home/yubeshi/workspaces/generic_game_server/docs/architecture/.venv/lib/python3.12/site-packages/resources/aws/compute/fargate.png" width="101px" height="101px" preserveAspectRatio="xMinYMin meet" x="1725.5" y="-817.133"/>
 <text text-anchor="middle" x="1776" y="-694.63" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3436">monitor sidecar</text>
 <text text-anchor="middle" x="1776" y="-683.63" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3436">[essential=false]</text>
 <text text-anchor="middle" x="1776" y="-672.63" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3436">auto_shutdown.sh</text>
 </g>
-<!-- 90372bce7bea42f5966d882cbe75ee62&#45;&gt;6c614aaf4de74b36b2b4b624cd874299 -->
+<!-- 1ea99be524af4d73be8ddfa1b84c68e1&#45;&gt;77e566e95f394a05823f3141724f05c4 -->
 <g id="edge28" class="edge">
-<title>90372bce7bea42f5966d882cbe75ee62&#45;&gt;6c614aaf4de74b36b2b4b624cd874299</title>
+<title>1ea99be524af4d73be8ddfa1b84c68e1&#45;&gt;77e566e95f394a05823f3141724f05c4</title>
 <path fill="none" stroke="#7b8894" stroke-dasharray="5,2" d="M1071.61,-1810.72C1395.87,-1579.97 1425.82,-1537.42 1727.65,-873.17"/>
 <polygon fill="#7b8894" stroke="#7b8894" points="1730.94,-874.39 1731.89,-863.84 1724.56,-871.49 1730.94,-874.39"/>
 <text text-anchor="middle" x="717" y="-1315.23" font-family="Sans-Serif" font-size="13.00" fill="#2d3436">image pull</text>
 </g>
-<!-- 80ec9f2ecb834da2a3ca7547accf270f -->
+<!-- 98330b091427430abcac89c6e2464aac -->
 <g id="node6" class="node">
-<title>80ec9f2ecb834da2a3ca7547accf270f</title>
+<title>98330b091427430abcac89c6e2464aac</title>
 <image xlink:href="/home/yubeshi/workspaces/generic_game_server/docs/architecture/.venv/lib/python3.12/site-packages/resources/aws/storage/simple-storage-service-s3.png" width="101px" height="101px" preserveAspectRatio="xMinYMin meet" x="16.5" y="-1897.13"/>
 <text text-anchor="middle" x="67" y="-1777.63" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3436">S3</text>
 <text text-anchor="middle" x="67" y="-1766.63" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3436">tfstate</text>
 </g>
-<!-- 446d28354d2f4817916628532c09da9b -->
+<!-- c90ca100d87d48fb9227481e59de8eaa -->
 <g id="node7" class="node">
-<title>446d28354d2f4817916628532c09da9b</title>
+<title>c90ca100d87d48fb9227481e59de8eaa</title>
 <image xlink:href="/home/yubeshi/workspaces/generic_game_server/docs/architecture/.venv/lib/python3.12/site-packages/resources/aws/network/internet-gateway.png" width="101px" height="101px" preserveAspectRatio="xMinYMin meet" x="811.5" y="-1897.13"/>
 <text text-anchor="middle" x="862" y="-1777.63" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3436">Internet</text>
 <text text-anchor="middle" x="862" y="-1766.63" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3436">Gateway</text>
 </g>
-<!-- dc24fa2c49134253b7a2d59ceea899d1 -->
+<!-- cbc5f9a6b4b04b66824ea514eb93bcb3 -->
 <g id="node8" class="node">
-<title>dc24fa2c49134253b7a2d59ceea899d1</title>
+<title>cbc5f9a6b4b04b66824ea514eb93bcb3</title>
 <image xlink:href="/home/yubeshi/workspaces/generic_game_server/docs/architecture/.venv/lib/python3.12/site-packages/resources/aws/network/public-subnet.png" width="101px" height="101px" preserveAspectRatio="xMinYMin meet" x="652.5" y="-1897.13"/>
 <text text-anchor="middle" x="703" y="-1777.63" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3436">Public Subnet</text>
 <text text-anchor="middle" x="703" y="-1766.63" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3436">AZ&#45;a &#160;/24</text>
 </g>
-<!-- 840f553d028844fc92dd68ecb1ae4973 -->
+<!-- 0983d1eacfd14c87902baa3929a984ef -->
 <g id="node9" class="node">
-<title>840f553d028844fc92dd68ecb1ae4973</title>
+<title>0983d1eacfd14c87902baa3929a984ef</title>
 <image xlink:href="/home/yubeshi/workspaces/generic_game_server/docs/architecture/.venv/lib/python3.12/site-packages/resources/aws/network/public-subnet.png" width="101px" height="101px" preserveAspectRatio="xMinYMin meet" x="493.5" y="-1897.13"/>
 <text text-anchor="middle" x="544" y="-1777.63" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3436">Public Subnet</text>
 <text text-anchor="middle" x="544" y="-1766.63" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3436">AZ&#45;b &#160;/24</text>
 </g>
-<!-- 57be5148e2c5481aaeb7d89fb0167b60 -->
+<!-- bc36baf8d3cd4430bb72db2bf8934a0e -->
 <g id="node10" class="node">
-<title>57be5148e2c5481aaeb7d89fb0167b60</title>
+<title>bc36baf8d3cd4430bb72db2bf8934a0e</title>
 <image xlink:href="/home/yubeshi/workspaces/generic_game_server/docs/architecture/.venv/lib/python3.12/site-packages/resources/aws/network/endpoint.png" width="101px" height="101px" preserveAspectRatio="xMinYMin meet" x="334.5" y="-1897.13"/>
 <text text-anchor="middle" x="385" y="-1777.63" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3436">S3 Gateway</text>
 <text text-anchor="middle" x="385" y="-1766.63" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3436">Endpoint (no NAT)</text>
 </g>
-<!-- 2712505d54a54dd69ea44ef7bde4118c -->
+<!-- ada9632ad5a945caaa93b08be97362b7 -->
 <g id="node16" class="node">
-<title>2712505d54a54dd69ea44ef7bde4118c</title>
+<title>ada9632ad5a945caaa93b08be97362b7</title>
 <image xlink:href="/home/yubeshi/workspaces/generic_game_server/docs/architecture/.venv/lib/python3.12/site-packages/resources/aws/storage/simple-storage-service-s3.png" width="101px" height="101px" preserveAspectRatio="xMinYMin meet" x="1213.5" y="-265.133"/>
 <text text-anchor="middle" x="1264" y="-145.63" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3436">S3 Backup</text>
 <text text-anchor="middle" x="1264" y="-134.63" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3436">[Glacier IR tiering]</text>
 </g>
-<!-- 57be5148e2c5481aaeb7d89fb0167b60&#45;&gt;2712505d54a54dd69ea44ef7bde4118c -->
+<!-- bc36baf8d3cd4430bb72db2bf8934a0e&#45;&gt;ada9632ad5a945caaa93b08be97362b7 -->
 <g id="edge27" class="edge">
-<title>57be5148e2c5481aaeb7d89fb0167b60&#45;&gt;2712505d54a54dd69ea44ef7bde4118c</title>
+<title>bc36baf8d3cd4430bb72db2bf8934a0e&#45;&gt;ada9632ad5a945caaa93b08be97362b7</title>
 <path fill="none" stroke="#7b8894" stroke-dasharray="5,2" d="M391.92,-1763.46C453.67,-1028.45 480.72,-984.8 1206.05,-271.59"/>
 <polygon fill="#7b8894" stroke="#7b8894" points="1208.59,-274 1213.27,-264.49 1203.69,-269.01 1208.59,-274"/>
 <text text-anchor="middle" x="385.5" y="-1046.23" font-family="Sans-Serif" font-size="13.00" fill="#2d3436">S3 traffic</text>
 <text text-anchor="middle" x="385.5" y="-1032.23" font-family="Sans-Serif" font-size="13.00" fill="#2d3436">[no NAT]</text>
 </g>
-<!-- 96e8a988497e49439fbd56736fe7a0ae -->
+<!-- aaa5a8b0dba74edea8faa460e4c706fb -->
 <g id="node21" class="node">
-<title>96e8a988497e49439fbd56736fe7a0ae</title>
+<title>aaa5a8b0dba74edea8faa460e4c706fb</title>
 <image xlink:href="/home/yubeshi/workspaces/generic_game_server/docs/architecture/.venv/lib/python3.12/site-packages/resources/aws/integration/eventbridge.png" width="101px" height="101px" preserveAspectRatio="xMinYMin meet" x="2255.5" y="-1369.13"/>
 <text text-anchor="middle" x="2306" y="-1249.63" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3436">server_ready</text>
 <text text-anchor="middle" x="2306" y="-1238.63" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3436">SSM /ready change</text>
 </g>
-<!-- 2c3daa991561429ca91599774a7e2e21&#45;&gt;96e8a988497e49439fbd56736fe7a0ae -->
+<!-- 9a1c49bc588943e994655fe5242ef129&#45;&gt;aaa5a8b0dba74edea8faa460e4c706fb -->
 <g id="edge8" class="edge">
-<title>2c3daa991561429ca91599774a7e2e21&#45;&gt;96e8a988497e49439fbd56736fe7a0ae</title>
+<title>9a1c49bc588943e994655fe5242ef129&#45;&gt;aaa5a8b0dba74edea8faa460e4c706fb</title>
 <path fill="none" stroke="#7b8894" d="M1655.72,-1832.73C2028.48,-1730.24 2068.07,-1709.02 2250.26,-1410.7"/>
 <polygon fill="#7b8894" stroke="#7b8894" points="2253.48,-1412.16 2255.7,-1401.8 2247.5,-1408.51 2253.48,-1412.16"/>
 </g>
-<!-- 2432d96a9267419e85e8210530807242 -->
+<!-- 2d15f381fc0a48878553bd51e04fb2a3 -->
 <g id="node22" class="node">
-<title>2432d96a9267419e85e8210530807242</title>
+<title>2d15f381fc0a48878553bd51e04fb2a3</title>
 <image xlink:href="/home/yubeshi/workspaces/generic_game_server/docs/architecture/.venv/lib/python3.12/site-packages/resources/aws/integration/eventbridge.png" width="101px" height="101px" preserveAspectRatio="xMinYMin meet" x="2096.5" y="-1369.13"/>
 <text text-anchor="middle" x="2147" y="-1249.63" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3436">ecs_stopped</text>
 <text text-anchor="middle" x="2147" y="-1238.63" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3436">ECS task STOPPED</text>
 </g>
-<!-- f35d8bd1c5dd429a9119a91c91660265&#45;&gt;2432d96a9267419e85e8210530807242 -->
+<!-- 82a561ffd91441a0990f9669b044e6f9&#45;&gt;2d15f381fc0a48878553bd51e04fb2a3 -->
 <g id="edge11" class="edge">
-<title>f35d8bd1c5dd429a9119a91c91660265&#45;&gt;2432d96a9267419e85e8210530807242</title>
+<title>82a561ffd91441a0990f9669b044e6f9&#45;&gt;2d15f381fc0a48878553bd51e04fb2a3</title>
 <path fill="none" stroke="#7b8894" d="M2096.33,-1238.19C1817.86,-794.98 1804.75,-743.57 1885.5,-307.92"/>
 <polygon fill="#7b8894" stroke="#7b8894" points="1888.98,-308.35 1887.36,-297.88 1882.1,-307.07 1888.98,-308.35"/>
 </g>
-<!-- c69bb8d7ba9948d9907d8048b1385391&#45;&gt;446d28354d2f4817916628532c09da9b -->
+<!-- 091cefc3854d4db397daa7d42e09fdb5&#45;&gt;c90ca100d87d48fb9227481e59de8eaa -->
 <g id="edge26" class="edge">
-<title>c69bb8d7ba9948d9907d8048b1385391&#45;&gt;446d28354d2f4817916628532c09da9b</title>
+<title>091cefc3854d4db397daa7d42e09fdb5&#45;&gt;c90ca100d87d48fb9227481e59de8eaa</title>
 <path fill="none" stroke="#7b8894" stroke-dasharray="5,2" d="M912.71,-1824.93C1395.01,-1618.13 1428.25,-1586.3 1879.08,-857.15"/>
 <polygon fill="#7b8894" stroke="#7b8894" points="1882.12,-858.89 1884.4,-848.54 1876.17,-855.2 1882.12,-858.89"/>
 </g>
-<!-- db07181ee4594cc1a43fb408ad54a072 -->
+<!-- 9a4f748567684fcdb26cfeb63af64978 -->
 <g id="node15" class="node">
-<title>db07181ee4594cc1a43fb408ad54a072</title>
+<title>9a4f748567684fcdb26cfeb63af64978</title>
 <image xlink:href="/home/yubeshi/workspaces/generic_game_server/docs/architecture/.venv/lib/python3.12/site-packages/resources/aws/storage/elastic-file-system-efs.png" width="101px" height="101px" preserveAspectRatio="xMinYMin meet" x="1438.5" y="-265.133"/>
 <text text-anchor="middle" x="1489" y="-142.63" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3436">EFS</text>
 <text text-anchor="middle" x="1489" y="-131.63" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3436">Save data</text>
 <text text-anchor="middle" x="1489" y="-120.63" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3436">[prevent_destroy]</text>
 </g>
-<!-- c69bb8d7ba9948d9907d8048b1385391&#45;&gt;db07181ee4594cc1a43fb408ad54a072 -->
+<!-- 091cefc3854d4db397daa7d42e09fdb5&#45;&gt;9a4f748567684fcdb26cfeb63af64978 -->
 <g id="edge15" class="edge">
-<title>c69bb8d7ba9948d9907d8048b1385391&#45;&gt;db07181ee4594cc1a43fb408ad54a072</title>
+<title>091cefc3854d4db397daa7d42e09fdb5&#45;&gt;9a4f748567684fcdb26cfeb63af64978</title>
 <path fill="none" stroke="#7b8894" d="M1903.16,-683.6C1790.34,-391.46 1764.25,-359.51 1548.58,-245.78"/>
 <polygon fill="#7b8894" stroke="#7b8894" points="1549.98,-242.56 1539.5,-241 1546.72,-248.75 1549.98,-242.56"/>
 <text text-anchor="middle" x="1586" y="-487.23" font-family="Sans-Serif" font-size="13.00" fill="#2d3436">read/write</text>
 </g>
-<!-- 6c614aaf4de74b36b2b4b624cd874299&#45;&gt;2c3daa991561429ca91599774a7e2e21 -->
+<!-- 77e566e95f394a05823f3141724f05c4&#45;&gt;9a1c49bc588943e994655fe5242ef129 -->
 <g id="edge7" class="edge">
-<title>6c614aaf4de74b36b2b4b624cd874299&#45;&gt;2c3daa991561429ca91599774a7e2e21</title>
+<title>77e566e95f394a05823f3141724f05c4&#45;&gt;9a1c49bc588943e994655fe5242ef129</title>
 <path fill="none" stroke="#7b8894" d="M1655.64,-1766.6C1848.06,-1460.04 1854.69,-1402.18 1789.39,-873.99"/>
 <polygon fill="#7b8894" stroke="#7b8894" points="1792.83,-873.3 1788.13,-863.81 1785.88,-874.16 1792.83,-873.3"/>
 <text text-anchor="middle" x="1662.5" y="-1315.23" font-family="Sans-Serif" font-size="13.00" fill="#2d3436">ready=1 / buildid</text>
 </g>
-<!-- 6c614aaf4de74b36b2b4b624cd874299&#45;&gt;f35d8bd1c5dd429a9119a91c91660265 -->
+<!-- 77e566e95f394a05823f3141724f05c4&#45;&gt;82a561ffd91441a0990f9669b044e6f9 -->
 <g id="edge13" class="edge">
-<title>6c614aaf4de74b36b2b4b624cd874299&#45;&gt;f35d8bd1c5dd429a9119a91c91660265</title>
+<title>77e566e95f394a05823f3141724f05c4&#45;&gt;82a561ffd91441a0990f9669b044e6f9</title>
 <path fill="none" stroke="#7b8894" d="M1811.69,-669.26C1888.37,-459.07 1904.79,-402.91 1905.32,-307.95"/>
 <polygon fill="#7b8894" stroke="#7b8894" points="1908.82,-307.72 1905.32,-297.72 1901.82,-307.72 1908.82,-307.72"/>
 <text text-anchor="middle" x="1929" y="-494.23" font-family="Sans-Serif" font-size="13.00" fill="#2d3436">idle &#45;&gt; desired=0</text>
 <text text-anchor="middle" x="1929" y="-480.23" font-family="Sans-Serif" font-size="13.00" fill="#2d3436">+ EFS&#45;&gt;S3 sync</text>
 </g>
-<!-- 6c614aaf4de74b36b2b4b624cd874299&#45;&gt;db07181ee4594cc1a43fb408ad54a072 -->
+<!-- 77e566e95f394a05823f3141724f05c4&#45;&gt;9a4f748567684fcdb26cfeb63af64978 -->
 <g id="edge16" class="edge">
-<title>6c614aaf4de74b36b2b4b624cd874299&#45;&gt;db07181ee4594cc1a43fb408ad54a072</title>
+<title>77e566e95f394a05823f3141724f05c4&#45;&gt;9a4f748567684fcdb26cfeb63af64978</title>
 <path fill="none" stroke="#7b8894" d="M1752.45,-669.55C1689.21,-411.79 1669.13,-369.4 1547.58,-264.24"/>
 <polygon fill="#7b8894" stroke="#7b8894" points="1549.68,-261.42 1539.82,-257.55 1545.11,-266.73 1549.68,-261.42"/>
 <text text-anchor="middle" x="1457" y="-487.23" font-family="Sans-Serif" font-size="13.00" fill="#2d3436">read&#45;only</text>
 </g>
-<!-- 6c614aaf4de74b36b2b4b624cd874299&#45;&gt;2712505d54a54dd69ea44ef7bde4118c -->
+<!-- 77e566e95f394a05823f3141724f05c4&#45;&gt;ada9632ad5a945caaa93b08be97362b7 -->
 <g id="edge14" class="edge">
-<title>6c614aaf4de74b36b2b4b624cd874299&#45;&gt;2712505d54a54dd69ea44ef7bde4118c</title>
+<title>77e566e95f394a05823f3141724f05c4&#45;&gt;ada9632ad5a945caaa93b08be97362b7</title>
 <path fill="none" stroke="#7b8894" d="M1725.37,-670.34C1566.31,-369.51 1534.91,-336.99 1323.85,-241.43"/>
 <polygon fill="#7b8894" stroke="#7b8894" points="1325.2,-238.2 1314.64,-237.28 1322.32,-244.58 1325.2,-238.2"/>
 </g>
-<!-- 46eef654d7a14a5ab5fb28818fb9af9a -->
+<!-- 965e7e66a8c846eabbc71c5ef218e550 -->
 <g id="node17" class="node">
-<title>46eef654d7a14a5ab5fb28818fb9af9a</title>
+<title>965e7e66a8c846eabbc71c5ef218e550</title>
 <image xlink:href="/home/yubeshi/workspaces/generic_game_server/docs/architecture/.venv/lib/python3.12/site-packages/resources/aws/compute/lambda.png" width="101px" height="101px" preserveAspectRatio="xMinYMin meet" x="2263.5" y="-817.133"/>
 <text text-anchor="middle" x="2314" y="-701.13" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3436">notify_ip</text>
 </g>
-<!-- 46eef654d7a14a5ab5fb28818fb9af9a&#45;&gt;f6ce4b43982f4eb2a52307449d87b82e -->
+<!-- 965e7e66a8c846eabbc71c5ef218e550&#45;&gt;8244a2d765224d6f8962c8b58b0ade20 -->
 <g id="edge10" class="edge">
-<title>46eef654d7a14a5ab5fb28818fb9af9a&#45;&gt;f6ce4b43982f4eb2a52307449d87b82e</title>
+<title>965e7e66a8c846eabbc71c5ef218e550&#45;&gt;8244a2d765224d6f8962c8b58b0ade20</title>
 <path fill="none" stroke="#7b8894" d="M2364.66,-706.5C2568.86,-464 2614.7,-407.23 2671.77,-306.76"/>
 <polygon fill="#7b8894" stroke="#7b8894" points="2674.92,-308.29 2676.79,-297.86 2668.83,-304.85 2674.92,-308.29"/>
 <text text-anchor="middle" x="2743" y="-487.23" font-family="Sans-Serif" font-size="13.00" fill="#2d3436">IP notify</text>
 </g>
-<!-- 46eef654d7a14a5ab5fb28818fb9af9a&#45;&gt;f35d8bd1c5dd429a9119a91c91660265 -->
+<!-- 965e7e66a8c846eabbc71c5ef218e550&#45;&gt;82a561ffd91441a0990f9669b044e6f9 -->
 <g id="edge30" class="edge">
-<title>46eef654d7a14a5ab5fb28818fb9af9a&#45;&gt;f35d8bd1c5dd429a9119a91c91660265</title>
+<title>965e7e66a8c846eabbc71c5ef218e550&#45;&gt;82a561ffd91441a0990f9669b044e6f9</title>
 <path fill="none" stroke="#7b8894" d="M2278.85,-698.1C2122.2,-393.12 2095.3,-351.45 1962.15,-256.14"/>
 <polygon fill="#7b8894" stroke="#7b8894" points="1963.82,-253.03 1953.64,-250.07 1959.76,-258.73 1963.82,-253.03"/>
 <text text-anchor="middle" x="2313.5" y="-494.23" font-family="Sans-Serif" font-size="13.00" fill="#2d3436">DescribeTasks</text>
 <text text-anchor="middle" x="2313.5" y="-480.23" font-family="Sans-Serif" font-size="13.00" fill="#2d3436">ENI &#45;&gt; public IP</text>
 </g>
-<!-- 1c90ec266d6d407e98fa63a990188c14&#45;&gt;f35d8bd1c5dd429a9119a91c91660265 -->
+<!-- a5084bd1e45f4323a2a72c8621a5827e&#45;&gt;82a561ffd91441a0990f9669b044e6f9 -->
 <g id="edge29" class="edge">
-<title>1c90ec266d6d407e98fa63a990188c14&#45;&gt;f35d8bd1c5dd429a9119a91c91660265</title>
+<title>a5084bd1e45f4323a2a72c8621a5827e&#45;&gt;82a561ffd91441a0990f9669b044e6f9</title>
 <path fill="none" stroke="#7b8894" d="M1600.3,-698.12C1729.72,-415.2 1756.12,-364.66 1845.25,-272.54"/>
 <polygon fill="#7b8894" stroke="#7b8894" points="1847.88,-274.86 1852.35,-265.25 1842.87,-269.97 1847.88,-274.86"/>
 <text text-anchor="middle" x="1745" y="-494.23" font-family="Sans-Serif" font-size="13.00" fill="#2d3436">RunTask</text>
 <text text-anchor="middle" x="1745" y="-480.23" font-family="Sans-Serif" font-size="13.00" fill="#2d3436">UPDATE_ON_BOOT</text>
 </g>
-<!-- 666f4ca3b50c488d849dc6f0fa908b80 -->
+<!-- 955d8ba2f63442849b90cb4a78a37389 -->
 <g id="node19" class="node">
-<title>666f4ca3b50c488d849dc6f0fa908b80</title>
+<title>955d8ba2f63442849b90cb4a78a37389</title>
 <image xlink:href="/home/yubeshi/workspaces/generic_game_server/docs/architecture/.venv/lib/python3.12/site-packages/resources/aws/compute/lambda.png" width="101px" height="101px" preserveAspectRatio="xMinYMin meet" x="2043.5" y="-817.133"/>
 <text text-anchor="middle" x="2094" y="-701.13" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3436">cost_guard</text>
 </g>
-<!-- 666f4ca3b50c488d849dc6f0fa908b80&#45;&gt;f35d8bd1c5dd429a9119a91c91660265 -->
+<!-- 955d8ba2f63442849b90cb4a78a37389&#45;&gt;82a561ffd91441a0990f9669b044e6f9 -->
 <g id="edge20" class="edge">
-<title>666f4ca3b50c488d849dc6f0fa908b80&#45;&gt;f35d8bd1c5dd429a9119a91c91660265</title>
+<title>955d8ba2f63442849b90cb4a78a37389&#45;&gt;82a561ffd91441a0990f9669b044e6f9</title>
 <path fill="none" stroke="#7b8894" d="M2092,-698.05C2084.23,-447.1 2074.43,-405.25 1960.58,-277.7"/>
 <polygon fill="#7b8894" stroke="#7b8894" points="1962.93,-275.08 1953.65,-269.98 1957.72,-279.76 1962.93,-275.08"/>
 <text text-anchor="middle" x="2121.5" y="-487.23" font-family="Sans-Serif" font-size="13.00" fill="#2d3436">StopTask / desired=0</text>
 </g>
-<!-- 6997188946ab40ee843e0d80cde96532 -->
+<!-- 0f5e68a761c442cca21b4527c7d18973 -->
 <g id="node20" class="node">
-<title>6997188946ab40ee843e0d80cde96532</title>
+<title>0f5e68a761c442cca21b4527c7d18973</title>
 <image xlink:href="/home/yubeshi/workspaces/generic_game_server/docs/architecture/.venv/lib/python3.12/site-packages/resources/aws/compute/lambda.png" width="101px" height="101px" preserveAspectRatio="xMinYMin meet" x="1262.5" y="-817.133"/>
 <text text-anchor="middle" x="1313" y="-701.13" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3436">backup_efs</text>
 </g>
-<!-- 6997188946ab40ee843e0d80cde96532&#45;&gt;2712505d54a54dd69ea44ef7bde4118c -->
+<!-- 0f5e68a761c442cca21b4527c7d18973&#45;&gt;ada9632ad5a945caaa93b08be97362b7 -->
 <g id="edge18" class="edge">
-<title>6997188946ab40ee843e0d80cde96532&#45;&gt;2712505d54a54dd69ea44ef7bde4118c</title>
+<title>0f5e68a761c442cca21b4527c7d18973&#45;&gt;ada9632ad5a945caaa93b08be97362b7</title>
 <path fill="none" stroke="#7b8894" d="M1305.28,-697.79C1278.3,-456.83 1271.62,-393.26 1267.59,-308.09"/>
 <polygon fill="#7b8894" stroke="#7b8894" points="1271.07,-307.69 1267.12,-297.86 1264.08,-308.01 1271.07,-307.69"/>
 <text text-anchor="middle" x="1309.5" y="-487.23" font-family="Sans-Serif" font-size="13.00" fill="#2d3436">EFS&#45;&gt;S3 sync</text>
 </g>
-<!-- 96e8a988497e49439fbd56736fe7a0ae&#45;&gt;46eef654d7a14a5ab5fb28818fb9af9a -->
+<!-- aaa5a8b0dba74edea8faa460e4c706fb&#45;&gt;965e7e66a8c846eabbc71c5ef218e550 -->
 <g id="edge9" class="edge">
-<title>96e8a988497e49439fbd56736fe7a0ae&#45;&gt;46eef654d7a14a5ab5fb28818fb9af9a</title>
+<title>aaa5a8b0dba74edea8faa460e4c706fb&#45;&gt;965e7e66a8c846eabbc71c5ef218e550</title>
 <path fill="none" stroke="#7b8894" d="M2335.85,-1235.56C2404.98,-1040.25 2407.07,-997.87 2345.96,-844.52"/>
 <polygon fill="#7b8894" stroke="#7b8894" points="2349.2,-843.2 2342.23,-835.22 2342.7,-845.8 2349.2,-843.2"/>
 </g>
-<!-- 2432d96a9267419e85e8210530807242&#45;&gt;46eef654d7a14a5ab5fb28818fb9af9a -->
+<!-- 2d15f381fc0a48878553bd51e04fb2a3&#45;&gt;965e7e66a8c846eabbc71c5ef218e550 -->
 <g id="edge12" class="edge">
-<title>2432d96a9267419e85e8210530807242&#45;&gt;46eef654d7a14a5ab5fb28818fb9af9a</title>
+<title>2d15f381fc0a48878553bd51e04fb2a3&#45;&gt;965e7e66a8c846eabbc71c5ef218e550</title>
 <path fill="none" stroke="#7b8894" d="M2197.71,-1249.41C2267.24,-1149.99 2277.88,-1099.01 2305.48,-845.7"/>
 <polygon fill="#7b8894" stroke="#7b8894" points="2309,-845.76 2306.6,-835.44 2302.04,-845 2309,-845.76"/>
 </g>
-<!-- 82c0c838cb294bf98d5a1fea81c421c5 -->
+<!-- d5860f06015b4d46b24cf9b404994516 -->
 <g id="node23" class="node">
-<title>82c0c838cb294bf98d5a1fea81c421c5</title>
+<title>d5860f06015b4d46b24cf9b404994516</title>
 <image xlink:href="/home/yubeshi/workspaces/generic_game_server/docs/architecture/.venv/lib/python3.12/site-packages/resources/aws/integration/eventbridge.png" width="101px" height="101px" preserveAspectRatio="xMinYMin meet" x="1937.5" y="-1369.13"/>
 <text text-anchor="middle" x="1988" y="-1249.63" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3436">cost_guard</text>
 <text text-anchor="middle" x="1988" y="-1238.63" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3436">rate(1 hour)</text>
 </g>
-<!-- 82c0c838cb294bf98d5a1fea81c421c5&#45;&gt;666f4ca3b50c488d849dc6f0fa908b80 -->
+<!-- d5860f06015b4d46b24cf9b404994516&#45;&gt;955d8ba2f63442849b90cb4a78a37389 -->
 <g id="edge19" class="edge">
-<title>82c0c838cb294bf98d5a1fea81c421c5&#45;&gt;666f4ca3b50c488d849dc6f0fa908b80</title>
+<title>d5860f06015b4d46b24cf9b404994516&#45;&gt;955d8ba2f63442849b90cb4a78a37389</title>
 <path fill="none" stroke="#7b8894" d="M2037.04,-1235.32C2138.81,-1059.89 2146.45,-1018.06 2110.81,-845.1"/>
 <polygon fill="#7b8894" stroke="#7b8894" points="2114.2,-844.23 2108.74,-835.15 2107.35,-845.65 2114.2,-844.23"/>
 </g>
-<!-- ca12bdc2db64496aa9146014b50e4588 -->
+<!-- 134871ede3b94e08a1a560bc64c50de2 -->
 <g id="node24" class="node">
-<title>ca12bdc2db64496aa9146014b50e4588</title>
+<title>134871ede3b94e08a1a560bc64c50de2</title>
 <image xlink:href="/home/yubeshi/workspaces/generic_game_server/docs/architecture/.venv/lib/python3.12/site-packages/resources/aws/integration/eventbridge.png" width="101px" height="101px" preserveAspectRatio="xMinYMin meet" x="1778.5" y="-1369.13"/>
 <text text-anchor="middle" x="1829" y="-1249.63" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3436">backup_schedule</text>
 <text text-anchor="middle" x="1829" y="-1238.63" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3436">rate(24 hours)</text>
 </g>
-<!-- ca12bdc2db64496aa9146014b50e4588&#45;&gt;6997188946ab40ee843e0d80cde96532 -->
+<!-- 134871ede3b94e08a1a560bc64c50de2&#45;&gt;0f5e68a761c442cca21b4527c7d18973 -->
 <g id="edge17" class="edge">
-<title>ca12bdc2db64496aa9146014b50e4588&#45;&gt;6997188946ab40ee843e0d80cde96532</title>
+<title>134871ede3b94e08a1a560bc64c50de2&#45;&gt;0f5e68a761c442cca21b4527c7d18973</title>
 <path fill="none" stroke="#7b8894" d="M1797.92,-1235.52C1721.44,-1036.45 1682.82,-1003.21 1372.51,-804.65"/>
 <polygon fill="#7b8894" stroke="#7b8894" points="1374.03,-801.47 1363.72,-799.03 1370.26,-807.36 1374.03,-801.47"/>
 </g>
-<!-- c163802de969438688e1b8c0758cc8da -->
+<!-- 863e7f66074745d6920bc42464fe7bc9 -->
 <g id="node25" class="node">
-<title>c163802de969438688e1b8c0758cc8da</title>
+<title>863e7f66074745d6920bc42464fe7bc9</title>
 <image xlink:href="/home/yubeshi/workspaces/generic_game_server/docs/architecture/.venv/lib/python3.12/site-packages/resources/aws/cost/budgets.png" width="101px" height="101px" preserveAspectRatio="xMinYMin meet" x="2540.5" y="-1897.13"/>
 <text text-anchor="middle" x="2591" y="-1777.63" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3436">AWS Budgets</text>
 <text text-anchor="middle" x="2591" y="-1766.63" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3436">monthly 20/50/80/100%</text>
 </g>
-<!-- b71ffd0a153c4fbca926eeca57d6837e -->
+<!-- 680990a635d34998891cd1eb255d4b1b -->
 <g id="node27" class="node">
-<title>b71ffd0a153c4fbca926eeca57d6837e</title>
+<title>680990a635d34998891cd1eb255d4b1b</title>
 <image xlink:href="/home/yubeshi/workspaces/generic_game_server/docs/architecture/.venv/lib/python3.12/site-packages/resources/aws/integration/simple-notification-service-sns.png" width="101px" height="101px" preserveAspectRatio="xMinYMin meet" x="2540.5" y="-1369.13"/>
 <text text-anchor="middle" x="2591" y="-1249.63" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3436">SNS</text>
 <text text-anchor="middle" x="2591" y="-1238.63" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3436">cost_alert</text>
 </g>
-<!-- c163802de969438688e1b8c0758cc8da&#45;&gt;b71ffd0a153c4fbca926eeca57d6837e -->
+<!-- 863e7f66074745d6920bc42464fe7bc9&#45;&gt;680990a635d34998891cd1eb255d4b1b -->
 <g id="edge21" class="edge">
-<title>c163802de969438688e1b8c0758cc8da&#45;&gt;b71ffd0a153c4fbca926eeca57d6837e</title>
+<title>863e7f66074745d6920bc42464fe7bc9&#45;&gt;680990a635d34998891cd1eb255d4b1b</title>
 <path fill="none" stroke="#7b8894" d="M2626.75,-1763.16C2678.12,-1637.35 2675.91,-1592.42 2620.12,-1411.29"/>
 <polygon fill="#7b8894" stroke="#7b8894" points="2623.45,-1410.24 2617.16,-1401.72 2616.77,-1412.31 2623.45,-1410.24"/>
 </g>
-<!-- 5c13977b14ce436c8de56648de70c327 -->
+<!-- 7ddb4f1455bf4ac1a396103eb0384f22 -->
 <g id="node28" class="node">
-<title>5c13977b14ce436c8de56648de70c327</title>
+<title>7ddb4f1455bf4ac1a396103eb0384f22</title>
 <image xlink:href="/home/yubeshi/workspaces/generic_game_server/docs/architecture/.venv/lib/python3.12/site-packages/resources/aws/compute/lambda.png" width="101px" height="101px" preserveAspectRatio="xMinYMin meet" x="2540.5" y="-817.133"/>
 <text text-anchor="middle" x="2591" y="-701.13" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3436">notify_cost</text>
 </g>
-<!-- b71ffd0a153c4fbca926eeca57d6837e&#45;&gt;5c13977b14ce436c8de56648de70c327 -->
+<!-- 680990a635d34998891cd1eb255d4b1b&#45;&gt;7ddb4f1455bf4ac1a396103eb0384f22 -->
 <g id="edge22" class="edge">
-<title>b71ffd0a153c4fbca926eeca57d6837e&#45;&gt;5c13977b14ce436c8de56648de70c327</title>
+<title>680990a635d34998891cd1eb255d4b1b&#45;&gt;7ddb4f1455bf4ac1a396103eb0384f22</title>
 <path fill="none" stroke="#7b8894" d="M2623.76,-1235.44C2691,-1060.92 2690.46,-1019.18 2622.16,-844.69"/>
 <polygon fill="#7b8894" stroke="#7b8894" points="2625.34,-843.22 2618.43,-835.2 2618.83,-845.78 2625.34,-843.22"/>
 </g>
-<!-- 5c13977b14ce436c8de56648de70c327&#45;&gt;f6ce4b43982f4eb2a52307449d87b82e -->
+<!-- 7ddb4f1455bf4ac1a396103eb0384f22&#45;&gt;8244a2d765224d6f8962c8b58b0ade20 -->
 <g id="edge23" class="edge">
-<title>5c13977b14ce436c8de56648de70c327&#45;&gt;f6ce4b43982f4eb2a52307449d87b82e</title>
+<title>7ddb4f1455bf4ac1a396103eb0384f22&#45;&gt;8244a2d765224d6f8962c8b58b0ade20</title>
 <path fill="none" stroke="#7b8894" d="M2626.95,-697.9C2737.17,-486.19 2754.07,-438.98 2736.59,-307.96"/>
 <polygon fill="#7b8894" stroke="#7b8894" points="2740.04,-307.39 2735.21,-297.96 2733.11,-308.34 2740.04,-307.39"/>
 <text text-anchor="middle" x="2865" y="-487.23" font-family="Sans-Serif" font-size="13.00" fill="#2d3436">cost alert</text>
 </g>
-<!-- 4ac0e59b28264d21b34405fed91d4747 -->
+<!-- e458e79c3efa46e09ec9dee404aaf550 -->
 <g id="node29" class="node">
-<title>4ac0e59b28264d21b34405fed91d4747</title>
+<title>e458e79c3efa46e09ec9dee404aaf550</title>
 <image xlink:href="/home/yubeshi/workspaces/generic_game_server/docs/architecture/.venv/lib/python3.12/site-packages/resources/aws/integration/simple-queue-service-sqs.png" width="101px" height="101px" preserveAspectRatio="xMinYMin meet" x="2512.5" y="-265.133"/>
 <text text-anchor="middle" x="2563" y="-149.13" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#2d3436">SQS DLQ</text>
 </g>
-<!-- 5c13977b14ce436c8de56648de70c327&#45;&gt;4ac0e59b28264d21b34405fed91d4747 -->
+<!-- 7ddb4f1455bf4ac1a396103eb0384f22&#45;&gt;e458e79c3efa46e09ec9dee404aaf550 -->
 <g id="edge24" class="edge">
-<title>5c13977b14ce436c8de56648de70c327&#45;&gt;4ac0e59b28264d21b34405fed91d4747</title>
+<title>7ddb4f1455bf4ac1a396103eb0384f22&#45;&gt;e458e79c3efa46e09ec9dee404aaf550</title>
 <path fill="none" stroke="#7b8894" d="M2609.08,-698.03C2666.71,-477.21 2668.79,-434.58 2601.26,-292.49"/>
 <polygon fill="#7b8894" stroke="#7b8894" points="2604.4,-290.94 2596.92,-283.43 2598.08,-293.96 2604.4,-290.94"/>
 <text text-anchor="middle" x="2600" y="-487.23" font-family="Sans-Serif" font-size="13.00" fill="#2d3436">on failure</text>
