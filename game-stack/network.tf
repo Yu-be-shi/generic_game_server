@@ -18,7 +18,7 @@ data "aws_availability_zones" "available" {
   state = "available"
 }
 
-# IAM ポリシーの Resource ARN 構築に使用（iam.tf / notifications.tf から参照）
+# IAM ポリシーの Resource ARN 構築に使用（iam.tf / cost_alerts.tf / notify_ip.tf から参照）
 data "aws_caller_identity" "current" {}
 
 # control-plane が作成した共有 VPC を "ggs-shared-vpc" タグで検索して参照する。
@@ -67,6 +67,12 @@ locals {
   # regional（既定）: 全パブリックサブネット（複数 AZ）
   # one_zone: sort した先頭サブネット 1 つに固定（EFS マウントターゲットと同一 AZ が必須）
   efs_subnets = var.efs_storage_class == "one_zone" ? [sort(data.aws_subnets.public.ids)[0]] : data.aws_subnets.public.ids
+
+  # 複数 Lambda（notify_ip, notify_cost, cost_guard, auto_update）共通のメッセージング設定
+  messaging_env = {
+    MESSAGING_PROVIDER    = var.messaging_provider
+    MESSAGING_WEBHOOK_URL = var.discord_webhook_url
+  }
 }
 
 # -----------------------------------------------------------
@@ -101,6 +107,12 @@ resource "aws_security_group" "game" {
   tags = {
     Name = "${local.name_prefix}-game-sg"
   }
+
+  lifecycle {
+    # ECS タスクの長寿命 ENI に紐づくため、無いと置き換え時に旧ENI解放待ちでデッドロックする
+    # （backup_lambda SG で実際に45分タイムアウトが発生したのと同じ危険な形）
+    create_before_destroy = true
+  }
 }
 
 # EFS 用 SG（ゲームコンテナおよびバックアップ Lambda からの NFS:2049 を許可）
@@ -129,5 +141,11 @@ resource "aws_security_group" "efs" {
 
   tags = {
     Name = "${local.name_prefix}-efs-sg"
+  }
+
+  lifecycle {
+    # EFS マウントターゲットの長寿命 ENI に紐づくため、無いと置き換え時に旧ENI解放待ちでデッドロックする
+    # （backup_lambda SG で実際に45分タイムアウトが発生したのと同じ危険な形）
+    create_before_destroy = true
   }
 }

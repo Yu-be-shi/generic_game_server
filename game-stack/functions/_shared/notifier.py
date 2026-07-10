@@ -20,6 +20,19 @@ import urllib.request
 
 logger = logging.getLogger()
 
+# Discord のメッセージ上限は 2000 文字。Slack は 40000 文字まで許容するが、
+# 実用的な上限として 4000 文字で切り詰める。
+DISCORD_MESSAGE_LIMIT = 1990
+SLACK_MESSAGE_LIMIT = 3990
+
+
+def _truncate(text: str, limit: int) -> str:
+    """limit 文字を超える場合は切り詰めて省略記号を付与する。"""
+    if len(text) > limit:
+        return text[:limit] + "\n...（省略）"
+    return text
+
+
 # Webhook URL: MESSAGING_WEBHOOK_URL を優先し、なければ後方互換で DISCORD_WEBHOOK_URL を参照
 _WEBHOOK_URL: str = (
     os.environ.get("MESSAGING_WEBHOOK_URL")
@@ -57,11 +70,28 @@ def send_message(text: str) -> None:
         )
 
 
+def send_message_safe(text: str) -> bool:
+    """
+    send_message() の fire-and-forget 版。
+    通知の送信失敗（Webhook URL未設定・HTTPエラー等）はログに残すだけで、
+    呼び出し元の本処理を止めない用途に使う。
+
+    Args:
+        text: 送信するメッセージ本文（絵文字・Markdown 可）
+    Returns:
+        送信に成功したら True、失敗したら False
+    """
+    try:
+        send_message(text)
+        return True
+    except Exception:
+        logger.warning("通知送信失敗（継続）: %s", text[:80], exc_info=True)
+        return False
+
+
 def _send_discord(content: str) -> None:
     """Discord Webhook に POST する（Cloudflare 403 対策 User-Agent 付き）"""
-    # Discord のメッセージ上限は 2000 文字
-    if len(content) > 1990:
-        content = content[:1990] + "\n...（省略）"
+    content = _truncate(content, DISCORD_MESSAGE_LIMIT)
 
     payload = json.dumps({"content": content}).encode("utf-8")
     req = urllib.request.Request(
@@ -93,9 +123,7 @@ def _send_slack(text: str) -> None:
     MESSAGING_WEBHOOK_URL 環境変数に設定する。
     メッセージは Slack のデフォルトフォーマット（markdown 非対応部分あり）。
     """
-    # Slack は 40000 文字まで許容するが、実用的な上限として 4000 文字で切詰
-    if len(text) > 3990:
-        text = text[:3990] + "\n...（省略）"
+    text = _truncate(text, SLACK_MESSAGE_LIMIT)
 
     payload = json.dumps({"text": text}).encode("utf-8")
     req = urllib.request.Request(

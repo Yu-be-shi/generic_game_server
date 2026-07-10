@@ -62,6 +62,8 @@ import zipfile
 import boto3
 from botocore.exceptions import ClientError
 
+from ssm_params import ssm_get, ssm_put
+
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
@@ -216,25 +218,21 @@ def restore_handler(event, context):
     s3.download_file(BACKUP_BUCKET, s3_key, str(local_zip))
     logger.info("zip ダウンロード完了: %d bytes", local_zip.stat().st_size)
 
-    # 2. 既存ワールドフォルダ（OLD_GUID）を特定
-    old_guid_dir = _find_existing_world(savegames_root)
-
-    if old_guid_dir is None:
-        # SaveGames/0 が存在しないか Level.sav が見つからない場合は
-        # source_world 名でフォルダを新規作成する
-        savegames_root.mkdir(parents=True, exist_ok=True)
-        old_guid_dir = savegames_root / source_world
-        old_guid_dir.mkdir(exist_ok=True)
-        logger.info("既存ワールドなし。新規フォルダを作成: %s", old_guid_dir)
-    else:
-        logger.info("既存ワールドフォルダを検出: %s", old_guid_dir)
-
-        # 3. 安全スナップショット（S3 へ退避）
-        _snapshot_to_s3(old_guid_dir, exec_id)
-
-        # 4. 既存フォルダの中身を削除
-        _clear_directory(old_guid_dir)
-        logger.info("既存フォルダをクリア完了: %s", old_guid_dir)
+    # 2-4. 既存ワールドフォルダ（OLD_GUID）を特定 → スナップショット退避 → クリア
+    #      （見つからない場合は source_world 名でフォルダを新規作成）
+    snapshot_prefix = f"{BACKUP_PREFIX}/_pre_restore_snapshot/{exec_id}"
+    old_guid_dir, _, _ = _prepare_world_dir(
+        savegames_root,
+        fallback_name=source_world,
+        snapshot_prefix=snapshot_prefix,
+        swallow_errors=False,
+        log_detected=lambda d: logger.info("既存ワールドフォルダを検出: %s", d),
+        log_snapshot=lambda n: logger.info(
+            "スナップショット完了: %d ファイル -> s3://%s/%s/",
+            n, BACKUP_BUCKET, snapshot_prefix,
+        ),
+        log_clear=lambda d: logger.info("既存フォルダをクリア完了: %s", d),
+    )
 
     # 5. zip から対象ファイルを展開
     stats = _extract_world(local_zip, source_world, old_guid_dir)
@@ -272,26 +270,90 @@ def _find_existing_world(savegames_root: pathlib.Path):
     return candidates[0][1]
 
 
-def _snapshot_to_s3(world_dir: pathlib.Path, exec_id: str):
+def _safe_join(root: pathlib.Path, relative: str):
     """
-    既存ワールドフォルダを S3 のスナップショット領域へ退避する。
-    パス: s3://<BACKUP_BUCKET>/<BACKUP_PREFIX>/_pre_restore_snapshot/<exec_id>/...
-    ロールバック時はこのパスからファイルを手動で戻す。
+    root 配下に安全に結合したパスを返す。パストラバーサル（zip や S3 キーに含まれる
+    "../" 等で root 外に出ようとする経路）を検出した場合は None を返す。
     """
-    snapshot_prefix = f"{BACKUP_PREFIX}/_pre_restore_snapshot/{exec_id}"
+    dest_path = root / relative
+    try:
+        dest_path.resolve().relative_to(root.resolve())
+    except ValueError:
+        return None
+    return dest_path
+
+
+def _snapshot_to_s3(root_dir: pathlib.Path, prefix: str, swallow_errors: bool = False) -> int:
+    """
+    root_dir 配下のファイルを丸ごと S3 の prefix 配下へアップロードする
+    （ロールバック用スナップショット・スロット保護の両方で使う汎用ヘルパー）。
+
+    swallow_errors=True の場合、個別ファイルの失敗はログに残して継続する
+    （restore_all/switch_slot の「途中で諦めない」設計）。
+    False（既定）では失敗時に例外をそのまま伝播させる
+    （restore の「スナップショットが不完全なら危険な削除に進まない」設計を保つ）。
+
+    アップロードしたファイル数を返す。
+    """
+    if not root_dir.exists():
+        return 0
+
     uploaded = 0
-    for f in world_dir.rglob("*"):
+    for f in root_dir.rglob("*"):
         if not f.is_file():
             continue
-        rel = f.relative_to(world_dir)
-        key = f"{snapshot_prefix}/{rel}"
-        s3.upload_file(str(f), BACKUP_BUCKET, key)
-        uploaded += 1
+        rel = f.relative_to(root_dir)
+        key = f"{prefix}/{rel}"
+        if swallow_errors:
+            try:
+                s3.upload_file(str(f), BACKUP_BUCKET, key)
+                uploaded += 1
+            except Exception:
+                logger.exception("スナップショット失敗: %s", f)
+        else:
+            s3.upload_file(str(f), BACKUP_BUCKET, key)
+            uploaded += 1
 
-    logger.info(
-        "スナップショット完了: %d ファイル -> s3://%s/%s/",
-        uploaded, BACKUP_BUCKET, snapshot_prefix,
-    )
+    return uploaded
+
+
+def _mirror_from_s3(prefix: str, dest_root: pathlib.Path, exclude_prefix: str = None):
+    """
+    S3 の prefix 配下（末尾 "/" 付き）を dest_root へミラーダウンロードする
+    （restore_all・switch_slot の両方で使う汎用ヘルパー）。
+    exclude_prefix が指定されていれば、そのプレフィックスに一致するキーは除外する。
+    追加・上書きのみ行い、dest_root 側にしかないファイルの削除は行わない（安全側）。
+
+    (downloaded, failed) のタプルを返す。
+    """
+    downloaded = 0
+    failed = 0
+    paginator = s3.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=BACKUP_BUCKET, Prefix=prefix):
+        for obj in page.get("Contents", []):
+            key = obj["Key"]
+            if exclude_prefix and key.startswith(exclude_prefix):
+                continue
+
+            relative = key[len(prefix):]
+            if not relative:
+                continue
+
+            dest_path = _safe_join(dest_root, relative)
+            if dest_path is None:
+                logger.warning("不正なキーをスキップ: %s", key)
+                failed += 1
+                continue
+
+            try:
+                dest_path.parent.mkdir(parents=True, exist_ok=True)
+                s3.download_file(BACKUP_BUCKET, key, str(dest_path))
+                downloaded += 1
+            except Exception:
+                logger.exception("ダウンロード失敗: %s", key)
+                failed += 1
+
+    return downloaded, failed
 
 
 def _clear_directory(directory: pathlib.Path):
@@ -301,6 +363,52 @@ def _clear_directory(directory: pathlib.Path):
             shutil.rmtree(item)
         else:
             item.unlink()
+
+
+def _prepare_world_dir(
+    savegames_root: pathlib.Path,
+    fallback_name: str,
+    snapshot_prefix: str,
+    swallow_errors: bool,
+    log_detected,
+    log_snapshot,
+    log_clear,
+):
+    """
+    restore_handler・switch_slot_handler 共通の
+    「ワールドフォルダ特定 → (存在すればスナップショットしてクリア) → (なければ新規作成)」手順。
+
+    見つからない場合: savegames_root/fallback_name を新規作成して返す
+    （"既存ワールドなし。新規フォルダを作成" を固定文言でログ出力。両ハンドラで同一文言）。
+
+    見つかった場合: log_detected(dir) → _snapshot_to_s3(swallow_errors=swallow_errors) →
+    log_snapshot(count) → _clear_directory(dir) → log_clear(dir) の順で実行する
+    （呼び出し元ごとに文言が異なるログはコールバックとして受け取り、
+    元の実装と同じ順序・文言で出力する）。
+
+    swallow_errors=False（restore_handler）の場合はスナップショット失敗が例外として
+    そのまま伝播し、危険な削除（_clear_directory）には進まない。
+    swallow_errors=True（switch_slot_handler）の場合は失敗をログに残して続行する。
+
+    戻り値: (target_dir, found_existing, snapshotted_count)
+    found_existing=False の場合 snapshotted_count は常に 0。
+    """
+    existing_dir = _find_existing_world(savegames_root)
+
+    if existing_dir is None:
+        savegames_root.mkdir(parents=True, exist_ok=True)
+        target_dir = savegames_root / fallback_name
+        target_dir.mkdir(exist_ok=True)
+        logger.info("既存ワールドなし。新規フォルダを作成: %s", target_dir)
+        return target_dir, False, 0
+
+    log_detected(existing_dir)
+    snapshotted = _snapshot_to_s3(existing_dir, snapshot_prefix, swallow_errors=swallow_errors)
+    log_snapshot(snapshotted)
+    _clear_directory(existing_dir)
+    log_clear(existing_dir)
+
+    return existing_dir, True, snapshotted
 
 
 def _extract_world(
@@ -359,14 +467,10 @@ def _extract_world(
                 stats["skipped"] += 1
                 continue
 
-            # 展開先パスを構築する
-            dest_path = dest_dir / relative
-
             # Zip-Slip 対策: 展開先が dest_dir 配下であることを検証する
             # 悪意ある zip（"../../etc/passwd" 等）によるパストラバーサルを防ぐ
-            try:
-                dest_path.resolve().relative_to(dest_dir.resolve())
-            except ValueError:
+            dest_path = _safe_join(dest_dir, relative)
+            if dest_path is None:
                 logger.warning("パストラバーサルを検出してスキップ: %s", relative)
                 stats["skipped"] += 1
                 continue
@@ -399,57 +503,21 @@ def restore_all_handler(event, context):
     exec_id = context.aws_request_id
     snapshot_prefix = f"{BACKUP_PREFIX}/_pre_restore_snapshot/{exec_id}"
 
-    stats = {"snapshotted": 0, "downloaded": 0, "failed": 0}
-
     # 1. 現状の EFS を退避（ロールバック用）
-    if EFS_MOUNT_PATH.exists():
-        for f in EFS_MOUNT_PATH.rglob("*"):
-            if not f.is_file():
-                continue
-            rel = f.relative_to(EFS_MOUNT_PATH)
-            key = f"{snapshot_prefix}/{rel}"
-            try:
-                s3.upload_file(str(f), BACKUP_BUCKET, key)
-                stats["snapshotted"] += 1
-            except Exception:
-                logger.exception("スナップショット失敗: %s", f)
+    snapshotted = _snapshot_to_s3(EFS_MOUNT_PATH, snapshot_prefix, swallow_errors=True)
 
     logger.info(
         "restore_all スナップショット完了: %d ファイル -> s3://%s/%s/",
-        stats["snapshotted"], BACKUP_BUCKET, snapshot_prefix,
+        snapshotted, BACKUP_BUCKET, snapshot_prefix,
     )
 
     # 2. S3 → EFS ミラーリング（_pre_restore_snapshot 配下は除外）
     exclude_prefix = f"{BACKUP_PREFIX}/_pre_restore_snapshot/"
-    paginator = s3.get_paginator("list_objects_v2")
-    for page in paginator.paginate(Bucket=BACKUP_BUCKET, Prefix=f"{BACKUP_PREFIX}/"):
-        for obj in page.get("Contents", []):
-            key = obj["Key"]
-            if key.startswith(exclude_prefix):
-                continue
+    downloaded, failed = _mirror_from_s3(
+        f"{BACKUP_PREFIX}/", EFS_MOUNT_PATH, exclude_prefix=exclude_prefix
+    )
 
-            relative = key[len(BACKUP_PREFIX) + 1:]
-            if not relative:
-                continue
-
-            dest_path = EFS_MOUNT_PATH / relative
-
-            # パストラバーサル対策（S3キーは信頼できる想定だが念のため検証する）
-            try:
-                dest_path.resolve().relative_to(EFS_MOUNT_PATH.resolve())
-            except ValueError:
-                logger.warning("不正なキーをスキップ: %s", key)
-                stats["failed"] += 1
-                continue
-
-            try:
-                dest_path.parent.mkdir(parents=True, exist_ok=True)
-                s3.download_file(BACKUP_BUCKET, key, str(dest_path))
-                stats["downloaded"] += 1
-            except Exception:
-                logger.exception("ダウンロード失敗: %s", key)
-                stats["failed"] += 1
-
+    stats = {"snapshotted": snapshotted, "downloaded": downloaded, "failed": failed}
     logger.info(
         "restore_all 完了: snapshotted=%d downloaded=%d failed=%d",
         stats["snapshotted"], stats["downloaded"], stats["failed"],
@@ -492,65 +560,25 @@ def switch_slot_handler(event, context):
     savegames_root = EFS_MOUNT_PATH / SAVEGAMES_REL
     stats = {"protected": 0, "restored": 0, "failed": 0}
 
-    world_dir = _find_existing_world(savegames_root)
-
-    if world_dir is None:
-        # ワールドフォルダがまだ存在しない（初回起動前の EFS）場合は
-        # 切替先スロット名でフォルダを新規作成する（保護対象なし）
-        savegames_root.mkdir(parents=True, exist_ok=True)
-        world_dir = savegames_root / new_slot
-        world_dir.mkdir(exist_ok=True)
-        logger.info("既存ワールドなし。新規フォルダを作成: %s", world_dir)
-    else:
-        # 1. 現在のスロットを保護（S3 へアップロード）
-        protect_prefix = f"{BACKUP_PREFIX}/slots/{current_slot}"
-        for f in world_dir.rglob("*"):
-            if not f.is_file():
-                continue
-            rel = f.relative_to(world_dir)
-            key = f"{protect_prefix}/{rel}"
-            try:
-                s3.upload_file(str(f), BACKUP_BUCKET, key)
-                stats["protected"] += 1
-            except Exception:
-                logger.exception("スロット保護失敗: %s", f)
-
-        logger.info(
+    # 1-2. 現在のワールドフォルダを特定 → 現スロットへスナップショット退避 → クリア
+    #      （見つからない場合は new_slot 名でフォルダを新規作成、保護対象なし）
+    protect_prefix = f"{BACKUP_PREFIX}/slots/{current_slot}"
+    world_dir, _, stats["protected"] = _prepare_world_dir(
+        savegames_root,
+        fallback_name=new_slot,
+        snapshot_prefix=protect_prefix,
+        swallow_errors=True,
+        log_detected=lambda d: None,
+        log_snapshot=lambda n: logger.info(
             "スロット保護完了: %s -> s3://%s/%s/ (%d ファイル)",
-            current_slot, BACKUP_BUCKET, protect_prefix, stats["protected"],
-        )
-
-        # 2. ワールドフォルダの中身を削除（フォルダ自体は残す）
-        _clear_directory(world_dir)
-        logger.info("ワールドフォルダをクリア完了: %s", world_dir)
+            current_slot, BACKUP_BUCKET, protect_prefix, n,
+        ),
+        log_clear=lambda d: logger.info("ワールドフォルダをクリア完了: %s", d),
+    )
 
     # 3. 切替先スロットのデータを復元（S3 に存在する場合のみ）
     restore_prefix = f"{BACKUP_PREFIX}/slots/{new_slot}/"
-    paginator = s3.get_paginator("list_objects_v2")
-    for page in paginator.paginate(Bucket=BACKUP_BUCKET, Prefix=restore_prefix):
-        for obj in page.get("Contents", []):
-            key = obj["Key"]
-            relative = key[len(restore_prefix):]
-            if not relative:
-                continue
-
-            dest_path = world_dir / relative
-
-            # パストラバーサル対策（S3キーは信頼できる想定だが念のため検証する）
-            try:
-                dest_path.resolve().relative_to(world_dir.resolve())
-            except ValueError:
-                logger.warning("不正なキーをスキップ: %s", key)
-                stats["failed"] += 1
-                continue
-
-            try:
-                dest_path.parent.mkdir(parents=True, exist_ok=True)
-                s3.download_file(BACKUP_BUCKET, key, str(dest_path))
-                stats["restored"] += 1
-            except Exception:
-                logger.exception("復元失敗: %s", key)
-                stats["failed"] += 1
+    stats["restored"], stats["failed"] = _mirror_from_s3(restore_prefix, world_dir)
 
     # 4. アクティブスロットを更新
     _set_active_slot(new_slot)
@@ -571,16 +599,11 @@ def _get_active_slot() -> str:
     """SSM から現在アクティブなスロット名を取得する。未設定・未構成時は DEFAULT_SLOT を返す。"""
     if not ACTIVE_SLOT_PARAM:
         return DEFAULT_SLOT
-    try:
-        return ssm.get_parameter(Name=ACTIVE_SLOT_PARAM)["Parameter"]["Value"]
-    except ClientError as e:
-        if e.response["Error"]["Code"] == "ParameterNotFound":
-            return DEFAULT_SLOT
-        raise
+    return ssm_get(ssm, ACTIVE_SLOT_PARAM, default=DEFAULT_SLOT)
 
 
 def _set_active_slot(slot: str):
     """SSM のアクティブスロットパラメータを更新する。ACTIVE_SLOT_PARAM 未設定時は何もしない。"""
     if not ACTIVE_SLOT_PARAM:
         return
-    ssm.put_parameter(Name=ACTIVE_SLOT_PARAM, Value=slot, Type="String", Overwrite=True)
+    ssm_put(ssm, ACTIVE_SLOT_PARAM, slot)

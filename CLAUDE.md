@@ -14,7 +14,7 @@
 
 ## スタック
 
-- **IaC:** Terraform 1.5.6+（`.terraform-version` で強制）
+- **IaC:** Terraform 1.15.6（`.terraform-version` で強制）
 - **コンピューティング:** AWS ECS Fargate（パブリックサブネット、固定コスト削減のため NAT なし）
 - **ストレージ:** AWS EFS（永続セーブデータ）+ S3（バックアップ、tfstate）
 - **コントロールプレーン:** Discord スラッシュコマンド → API Gateway v2 HTTP API → Lambda
@@ -91,20 +91,20 @@ EventBridge ルール:
 
 ## Lambda パッケージング
 
-Lambda ZIP ファイルは `terraform apply` のたびに Terraform の `archive_file` データソースによってビルドされる。手動のパッケージング手順は不要。共有モジュール `game-stack/functions/_shared/notifier.py` は `archive_file` リソース内の個別の `source {}` ブロックとして各ゲームスタック Lambda（notify_ip、notify_cost、auto_update）にバンドルされる。
+Lambda ZIP ファイルは `terraform apply` のたびに Terraform の `archive_file` データソースによってビルドされる。手動のパッケージング手順は不要。game-stack の共有モジュール（`game-stack/functions/_shared/{notifier,aws_clients,ssm_params,ecs_net}.py`）は `archive_file` リソース内の個別の `source {}` ブロックとして、各ゲームスタック Lambda（notify_ip、notify_cost、cost_guard、auto_update、backup_efs）に必要な分だけバンドルされる。control-plane の discord_control Lambda は `source_dir` でディレクトリ全体を zip 化するため、同名の並行実装ファイル（`aws_clients.py`、`ssm_params.py`、`ecs_net.py`）を `control-plane/functions/discord_control/` に直接配置しており、Terraform 側の追加設定は不要。両者は別々の Terraform root module（別 state）のため import で共有できず、修正時は両方のファイルを同期させる必要がある。
 
 ## デプロイコマンド
 
 ```bash
 # === control-plane（1 度だけ）===
 cd control-plane
+cp .env.example .env   # 初回のみ。TF_VAR_discord_public_key・DISCORD_APP_ID 等を記入する（.env は .gitignore 済み）
 terraform init -backend-config=backend.hcl
-terraform apply -var="discord_public_key=<64文字の16進数>" -var="aws_region=ap-northeast-1"
+set -a && source .env && set +a
+terraform apply
 # outputs.interactions_endpoint_url を Discord Developer Portal にコピー
 
-# スラッシュコマンドを登録（apply 後に 1 度だけ）
-export DISCORD_APP_ID="..."
-export DISCORD_BOT_TOKEN="..."
+# スラッシュコマンドを登録（apply 後に 1 度だけ。.env の DISCORD_APP_ID/DISCORD_BOT_TOKEN を使う）
 bash scripts/register_commands.sh
 
 # === game-stack（ゲームごと）===
@@ -173,6 +173,11 @@ aws ecs update-service --cluster palworld-palworld-cluster \
 aws ecs update-service --cluster palworld-palworld-cluster \
   --service palworld-palworld-service --desired-count 0 --region ap-northeast-1
 
+# 状態確認
+aws ecs describe-services --cluster palworld-palworld-cluster \
+  --services palworld-palworld-service --region ap-northeast-1 \
+  --query "services[0].{Status:status,Running:runningCount,Desired:desiredCount}"
+
 # ゲームサーバー + モニターのログをストリーミング
 aws logs tail /ecs/palworld-palworld --follow --region ap-northeast-1
 
@@ -183,6 +188,25 @@ aws logs tail /aws/lambda/palworld-palworld-auto-update --follow --region ap-nor
 
 # SSM ステータスパラメータを読む
 aws ssm get-parameters-by-path --path /ggs/palworld-palworld --region ap-northeast-1
+```
+
+### コスト通知の疎通テスト
+
+AWS Budgets の実際のしきい値到達を待たずに、SNS → Lambda(`notify_cost`) → Discord/Slack の通知経路を検証できる。
+
+```bash
+# 疎通テスト送信（Discord/Slack にテストメッセージが届けば経路は正常）
+aws sns publish \
+  --topic-arn arn:aws:sns:ap-northeast-1:<account_id>:palworld-palworld-cost-alert \
+  --subject "コスト通知 疎通テスト" \
+  --message "これはテストです。Discord に届けば SNS→Lambda→webhook は正常です。" \
+  --region ap-northeast-1
+
+# DLQ 確認（Lambda 障害時のメッセージ蓄積を確認）
+aws sqs get-queue-attributes \
+  --queue-url $(aws sqs get-queue-url --queue-name palworld-palworld-notify-cost-dlq --region ap-northeast-1 --query QueueUrl --output text) \
+  --attribute-names ApproximateNumberOfMessages \
+  --region ap-northeast-1
 ```
 
 ## セーブデータの切り替え（`save_slot`）

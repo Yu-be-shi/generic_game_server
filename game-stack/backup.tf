@@ -26,7 +26,6 @@ resource "aws_s3_bucket" "backup" {
 
   tags = {
     Name = "${local.name_prefix}-backup"
-    Game = var.game_name
   }
 }
 
@@ -134,120 +133,53 @@ resource "aws_security_group" "backup_lambda" {
   tags = {
     Name = "${local.name_prefix}-backup-lambda-sg"
   }
-}
 
-# ============================================================
-# バックアップ Lambda IAM ロール
-# ============================================================
-
-resource "aws_iam_role" "backup_lambda" {
-  name = "${local.name_prefix}-backup-lambda"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect    = "Allow"
-      Principal = { Service = "lambda.amazonaws.com" }
-      Action    = "sts:AssumeRole"
-    }]
-  })
-
-  tags = {
-    Name = "${local.name_prefix}-backup-lambda"
+  lifecycle {
+    # create_before_destroy が無いと「旧SG破棄→新SG作成」の順になり、
+    # backup_efs Lambda の旧ENI解放待ちで apply 全体が長時間（実測45分タイムアウトで失敗）ブロックされる。
+    # 新VPC側で新SGを先に作ってからLambdaを更新し、旧SGの破棄は最後（かつ非ブロッキング）にする。
+    create_before_destroy = true
   }
 }
 
-# VPC 内 Lambda に必要な ENI 作成権限（AWSLambdaVPCAccessExecutionRole）
-resource "aws_iam_role_policy_attachment" "backup_lambda_vpc" {
-  role       = aws_iam_role.backup_lambda.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
-}
-
-resource "aws_iam_role_policy" "backup_lambda" {
-  name = "${local.name_prefix}-backup-lambda"
-  role = aws_iam_role.backup_lambda.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid      = "CloudWatchLogs"
-        Effect   = "Allow"
-        Action   = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
-        Resource = "arn:aws:logs:*:*:*"
-      },
-      {
-        # EFS アクセスポイント経由でのマウントに必要
-        Sid    = "EfsMount"
-        Effect = "Allow"
-        Action = [
-          "elasticfilesystem:ClientMount",
-          "elasticfilesystem:ClientWrite",
-          "elasticfilesystem:ClientRootAccess"
-        ]
-        Resource = aws_efs_file_system.main.arn
-      },
-      {
-        # バックアップバケットへの読み書きに必要
-        Sid    = "S3Backup"
-        Effect = "Allow"
-        Action = [
-          "s3:PutObject",
-          "s3:GetObject",
-          "s3:ListBucket"
-        ]
-        Resource = [
-          aws_s3_bucket.backup.arn,
-          "${aws_s3_bucket.backup.arn}/*"
-        ]
-      },
-      {
-        # switch_slot 用: 現在アクティブなスロット名を記録する SSM パラメータ 1 個のみに限定
-        Sid      = "ActiveSlotParam"
-        Effect   = "Allow"
-        Action   = ["ssm:GetParameter", "ssm:PutParameter"]
-        Resource = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/ggs/${local.name_prefix}/active_slot"
-      }
-    ]
-  })
-}
-
 # ============================================================
-# バックアップ Lambda 関数
+# バックアップ Lambda 関数（IAM ロール込み、modules/lambda_function で作成）
 # ============================================================
-
-resource "aws_cloudwatch_log_group" "backup_lambda" {
-  name              = "/aws/lambda/${local.name_prefix}-backup-efs"
-  retention_in_days = 7
-
-  tags = {
-    Name = "${local.name_prefix}-backup-efs-logs"
-  }
-}
 
 data "archive_file" "backup_efs" {
   type        = "zip"
-  source_file = "${path.module}/functions/backup_efs/backup_efs.py"
   output_path = "${path.module}/functions/backup_efs/backup_efs.zip"
+
+  # ハンドラ本体 + 共有 ssm_params モジュールを同梱
+  source {
+    content  = file("${path.module}/functions/backup_efs/backup_efs.py")
+    filename = "backup_efs.py"
+  }
+  source {
+    content  = file("${path.module}/functions/_shared/ssm_params.py")
+    filename = "ssm_params.py"
+  }
 }
 
-resource "aws_lambda_function" "backup_efs" {
-  function_name    = "${local.name_prefix}-backup-efs"
-  role             = aws_iam_role.backup_lambda.arn
-  runtime          = "python3.12"
-  handler          = "backup_efs.lambda_handler"
+module "backup_efs_lambda" {
+  source = "../modules/lambda_function"
+
+  function_name = "${local.name_prefix}-backup-efs"
+  # IAM ロールの実 AWS 名は歴史的経緯で function_name と不一致（-backup-lambda）。
+  # role_name を省略すると function_name にフォールバックしてロール名が変わってしまい、
+  # aws_iam_role.name は ForceNew のためロール再作成（実運用中インフラの破壊的変更）が
+  # 発生する。既存名を明示的に維持する。
+  role_name        = "${local.name_prefix}-backup-lambda"
   filename         = data.archive_file.backup_efs.output_path
   source_code_hash = data.archive_file.backup_efs.output_base64sha256
+  handler          = "backup_efs.lambda_handler"
 
   # セーブデータが大きい場合も完走できるよう最大タイムアウト（15分）に設定
   timeout     = 900
   memory_size = 512
 
-  # Graviton (arm64) で実行（純 Python のため無改修で約 20% コスト削減）
-  architectures = ["arm64"]
-
   # EFS をマウントする（既存のアクセスポイントを流用）
-  file_system_config {
+  file_system_config = {
     arn              = aws_efs_access_point.main.arn
     local_mount_path = "/mnt/efs"
   }
@@ -255,57 +187,109 @@ resource "aws_lambda_function" "backup_efs" {
   # VPC 内に配置（EFS と S3 Gateway Endpoint に到達するため）
   # one_zone 選択時は EFS と同一 AZ のサブネットに固定（異 AZ だと EFS マウント不可）
   # regional（既定）は全パブリックサブネット = 従来どおり
-  vpc_config {
+  vpc_config = {
     subnet_ids         = local.efs_subnets
     security_group_ids = [aws_security_group.backup_lambda.id]
   }
 
-  environment {
-    variables = {
-      BACKUP_BUCKET     = aws_s3_bucket.backup.id
-      BACKUP_PREFIX     = local.backup_prefix
-      ACTIVE_SLOT_PARAM = "/ggs/${local.name_prefix}/active_slot"
-    }
+  environment_variables = {
+    BACKUP_BUCKET     = aws_s3_bucket.backup.id
+    BACKUP_PREFIX     = local.backup_prefix
+    ACTIVE_SLOT_PARAM = "/ggs/${local.name_prefix}/active_slot"
   }
 
-  # EFS マウントターゲットが準備できてから作成する
-  # S3 VPC Endpoint は control-plane/network.tf に移設済みのため参照不要
-  depends_on = [
-    aws_efs_mount_target.main,
-    aws_cloudwatch_log_group.backup_lambda,
-    aws_iam_role_policy_attachment.backup_lambda_vpc,
+  extra_iam_statements = [
+    {
+      # EFS アクセスポイント経由でのマウントに必要
+      Sid    = "EfsMount"
+      Effect = "Allow"
+      Action = [
+        "elasticfilesystem:ClientMount",
+        "elasticfilesystem:ClientWrite",
+        "elasticfilesystem:ClientRootAccess"
+      ]
+      Resource = aws_efs_file_system.main.arn
+    },
+    {
+      # バックアップバケットへの読み書きに必要
+      Sid    = "S3Backup"
+      Effect = "Allow"
+      Action = [
+        "s3:PutObject",
+        "s3:GetObject",
+        "s3:ListBucket"
+      ]
+      Resource = [
+        aws_s3_bucket.backup.arn,
+        "${aws_s3_bucket.backup.arn}/*"
+      ]
+    },
+    {
+      # switch_slot 用: 現在アクティブなスロット名を記録する SSM パラメータ 1 個のみに限定
+      Sid      = "ActiveSlotParam"
+      Effect   = "Allow"
+      Action   = ["ssm:GetParameter", "ssm:PutParameter"]
+      Resource = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/ggs/${local.name_prefix}/active_slot"
+    }
   ]
 
-  tags = {
-    Name = "${local.name_prefix}-backup-efs"
-    Game = var.game_name
-  }
+  # EFS マウントターゲットが準備できてから作成する
+  depends_on = [aws_efs_mount_target.main]
+}
+
+moved {
+  from = aws_iam_role.backup_lambda
+  to   = module.backup_efs_lambda.aws_iam_role.this
+}
+
+moved {
+  from = aws_iam_role_policy.backup_lambda
+  to   = module.backup_efs_lambda.aws_iam_role_policy.this
+}
+
+moved {
+  from = aws_iam_role_policy_attachment.backup_lambda_vpc
+  to   = module.backup_efs_lambda.aws_iam_role_policy_attachment.vpc[0]
+}
+
+moved {
+  from = aws_cloudwatch_log_group.backup_lambda
+  to   = module.backup_efs_lambda.aws_cloudwatch_log_group.this
+}
+
+moved {
+  from = aws_lambda_function.backup_efs
+  to   = module.backup_efs_lambda.aws_lambda_function.this
 }
 
 # ============================================================
 # EventBridge スケジュール（24時間ごとにバックアップ Lambda を起動）
 # ============================================================
 
-resource "aws_cloudwatch_event_rule" "backup_schedule" {
-  name                = "${local.name_prefix}-backup-schedule"
-  description         = "${var.game_name} daily EFS backup to S3"
+module "backup_schedule_trigger" {
+  source = "../modules/eventbridge_lambda_trigger"
+
+  rule_name           = "${local.name_prefix}-backup-schedule"
+  rule_description    = "${var.game_name} daily EFS backup to S3"
   schedule_expression = "rate(24 hours)"
 
-  tags = {
-    Name = "${local.name_prefix}-backup-schedule"
-  }
-}
-
-resource "aws_cloudwatch_event_target" "backup_lambda" {
-  rule      = aws_cloudwatch_event_rule.backup_schedule.name
-  target_id = "BackupEfsLambda"
-  arn       = aws_lambda_function.backup_efs.arn
-}
-
-resource "aws_lambda_permission" "backup_from_eventbridge" {
+  function_name = module.backup_efs_lambda.function_name
+  function_arn  = module.backup_efs_lambda.function_arn
+  target_id     = "BackupEfsLambda"
   statement_id  = "AllowExecutionFromEventBridge"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.backup_efs.function_name
-  principal     = "events.amazonaws.com"
-  source_arn    = aws_cloudwatch_event_rule.backup_schedule.arn
+}
+
+moved {
+  from = aws_cloudwatch_event_rule.backup_schedule
+  to   = module.backup_schedule_trigger.aws_cloudwatch_event_rule.this
+}
+
+moved {
+  from = aws_cloudwatch_event_target.backup_lambda
+  to   = module.backup_schedule_trigger.aws_cloudwatch_event_target.this
+}
+
+moved {
+  from = aws_lambda_permission.backup_from_eventbridge
+  to   = module.backup_schedule_trigger.aws_lambda_permission.this
 }

@@ -18,7 +18,7 @@ data "archive_file" "auto_update" {
   type        = "zip"
   output_path = "${path.module}/functions/auto_update/auto_update.zip"
 
-  # ハンドラ本体 + 共有 notifier モジュールを同梱（notify_ip と同じパターン）
+  # ハンドラ本体 + 共有モジュールを同梱（notify_ip と同じパターン）
   source {
     content  = file("${path.module}/functions/auto_update/auto_update.py")
     filename = "auto_update.py"
@@ -27,155 +27,120 @@ data "archive_file" "auto_update" {
     content  = file("${path.module}/functions/_shared/notifier.py")
     filename = "notifier.py"
   }
-}
-
-# ---------------------------------------------------------------
-# IAM ロール
-# ---------------------------------------------------------------
-
-resource "aws_iam_role" "auto_update" {
-  name = "${local.name_prefix}-auto-update"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect    = "Allow"
-      Principal = { Service = "lambda.amazonaws.com" }
-      Action    = "sts:AssumeRole"
-    }]
-  })
-
-  tags = {
-    Name = "${local.name_prefix}-auto-update"
+  source {
+    content  = file("${path.module}/functions/_shared/aws_clients.py")
+    filename = "aws_clients.py"
   }
-}
-
-resource "aws_iam_role_policy" "auto_update" {
-  name = "${local.name_prefix}-auto-update"
-  role = aws_iam_role.auto_update.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid      = "CloudWatchLogs"
-        Effect   = "Allow"
-        Action   = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
-        Resource = "arn:aws:logs:*:*:*"
-      },
-      {
-        # ワンオフ更新タスクの起動
-        # タスク定義ファミリーのリビジョン全体に限定し、クラスター条件でさらに絞る
-        Sid      = "EcsRunTask"
-        Effect   = "Allow"
-        Action   = ["ecs:RunTask"]
-        Resource = "arn:aws:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:task-definition/${local.name_prefix}:*"
-        Condition = {
-          ArnEquals = { "ecs:cluster" = aws_ecs_cluster.game.arn }
-        }
-      },
-      {
-        # アップデート完了後の強制停止（ハング時の唯一の停止経路）
-        Sid      = "EcsStopTask"
-        Effect   = "Allow"
-        Action   = ["ecs:StopTask"]
-        Resource = "arn:aws:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:task/${local.cluster_name}/*"
-      },
-      {
-        # 起動中タスクの確認（二重起動ガード）
-        # ecs:ListTasks / ecs:DescribeTasks はリソースレベル制限が効かないため * を使用
-        Sid      = "EcsDescribeTasks"
-        Effect   = "Allow"
-        Action   = ["ecs:ListTasks", "ecs:DescribeTasks"]
-        Resource = "*"
-      },
-      {
-        # サービスの desiredCount 確認（二重起動ガード）
-        Sid      = "EcsDescribeService"
-        Effect   = "Allow"
-        Action   = ["ecs:DescribeServices"]
-        Resource = "arn:aws:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:service/${local.cluster_name}/${local.service_name}"
-      },
-      {
-        # run_task はタスクロール（task）と実行ロール（task_execution）両方の PassRole が必要
-        # 片方だけでは AccessDenied になるため必ず両方指定する
-        Sid    = "PassEcsRoles"
-        Effect = "Allow"
-        Action = ["iam:PassRole"]
-        Resource = [
-          aws_iam_role.task.arn,
-          aws_iam_role.task_execution.arn,
-        ]
-        Condition = {
-          StringEquals = { "iam:PassedToService" = "ecs-tasks.amazonaws.com" }
-        }
-      },
-      {
-        # SSM: maintenance フラグ / update_ready / update_players の読み書き
-        Sid      = "SsmStatus"
-        Effect   = "Allow"
-        Action   = ["ssm:GetParameter", "ssm:PutParameter"]
-        Resource = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/ggs/${local.name_prefix}/*"
-      }
-    ]
-  })
-}
-
-# ---------------------------------------------------------------
-# CloudWatch Logs グループ
-# ---------------------------------------------------------------
-
-resource "aws_cloudwatch_log_group" "auto_update" {
-  name              = "/aws/lambda/${local.name_prefix}-auto-update"
-  retention_in_days = 7
-
-  tags = {
-    Name = "${local.name_prefix}-auto-update-logs"
+  source {
+    content  = file("${path.module}/functions/_shared/ssm_params.py")
+    filename = "ssm_params.py"
   }
 }
 
 # ---------------------------------------------------------------
-# Lambda 関数
+# Lambda 関数（IAM ロール込み、modules/lambda_function で作成）
 # ---------------------------------------------------------------
 
-resource "aws_lambda_function" "auto_update" {
+module "auto_update_lambda" {
+  source = "../modules/lambda_function"
+
   function_name    = "${local.name_prefix}-auto-update"
-  role             = aws_iam_role.auto_update.arn
-  runtime          = "python3.12"
-  handler          = "auto_update.lambda_handler"
   filename         = data.archive_file.auto_update.output_path
   source_code_hash = data.archive_file.auto_update.output_base64sha256
+  handler          = "auto_update.lambda_handler"
 
   # SteamCMD アップデート + ポーリング（最大12分）+ stop_task の余裕を見て 15 分
   timeout     = 900
   memory_size = 256
   # VPC 不要: ECS/SSM 制御 API のみ使用（EFS をマウントしない）
 
-  # Graviton (arm64) で実行（純 Python のため無改修で約 20% コスト削減）
-  architectures = ["arm64"]
+  environment_variables = merge(local.messaging_env, {
+    CLUSTER_ARN       = aws_ecs_cluster.game.arn
+    SERVICE_NAME      = local.service_name
+    TASK_DEF_FAMILY   = local.name_prefix
+    SUBNET_IDS        = join(",", local.efs_subnets)
+    SECURITY_GROUP_ID = aws_security_group.game.id
+    NAME_PREFIX       = local.name_prefix
+    GAME_NAME         = var.game_name
+    # Steam バージョン事前チェック設定（非 Steam 系ゲームは空文字列のまま）
+    STEAM_APP_ID = var.steam_app_id
+    STEAM_BRANCH = var.steam_branch
+  })
 
-  environment {
-    variables = {
-      CLUSTER_ARN       = aws_ecs_cluster.game.arn
-      SERVICE_NAME      = local.service_name
-      TASK_DEF_FAMILY   = local.name_prefix
-      SUBNET_IDS        = join(",", data.aws_subnets.public.ids)
-      SECURITY_GROUP_ID = aws_security_group.game.id
-      NAME_PREFIX       = local.name_prefix
-      GAME_NAME         = var.game_name
-      # Steam バージョン事前チェック設定（非 Steam 系ゲームは空文字列のまま）
-      STEAM_APP_ID = var.steam_app_id
-      STEAM_BRANCH = var.steam_branch
-      # メッセージング設定（notifier.py 共有モジュールが参照）
-      MESSAGING_PROVIDER    = var.messaging_provider
-      MESSAGING_WEBHOOK_URL = var.discord_webhook_url
+  extra_iam_statements = [
+    {
+      # ワンオフ更新タスクの起動
+      # タスク定義ファミリーのリビジョン全体に限定し、クラスター条件でさらに絞る
+      Sid      = "EcsRunTask"
+      Effect   = "Allow"
+      Action   = ["ecs:RunTask"]
+      Resource = "arn:aws:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:task-definition/${local.name_prefix}:*"
+      Condition = {
+        ArnEquals = { "ecs:cluster" = aws_ecs_cluster.game.arn }
+      }
+    },
+    {
+      # アップデート完了後の強制停止（ハング時の唯一の停止経路）
+      Sid      = "EcsStopTask"
+      Effect   = "Allow"
+      Action   = ["ecs:StopTask"]
+      Resource = "arn:aws:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:task/${local.cluster_name}/*"
+    },
+    {
+      # 起動中タスクの確認（二重起動ガード）
+      # ecs:ListTasks / ecs:DescribeTasks はリソースレベル制限が効かないため * を使用
+      Sid      = "EcsDescribeTasks"
+      Effect   = "Allow"
+      Action   = ["ecs:ListTasks", "ecs:DescribeTasks"]
+      Resource = "*"
+    },
+    {
+      # サービスの desiredCount 確認（二重起動ガード）
+      Sid      = "EcsDescribeService"
+      Effect   = "Allow"
+      Action   = ["ecs:DescribeServices"]
+      Resource = "arn:aws:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:service/${local.cluster_name}/${local.service_name}"
+    },
+    {
+      # run_task はタスクロール（task）と実行ロール（task_execution）両方の PassRole が必要
+      # 片方だけでは AccessDenied になるため必ず両方指定する
+      Sid    = "PassEcsRoles"
+      Effect = "Allow"
+      Action = ["iam:PassRole"]
+      Resource = [
+        aws_iam_role.task.arn,
+        aws_iam_role.task_execution.arn,
+      ]
+      Condition = {
+        StringEquals = { "iam:PassedToService" = "ecs-tasks.amazonaws.com" }
+      }
+    },
+    {
+      # SSM: maintenance フラグ / update_ready / update_players の読み書き
+      Sid      = "SsmStatus"
+      Effect   = "Allow"
+      Action   = ["ssm:GetParameter", "ssm:PutParameter"]
+      Resource = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/ggs/${local.name_prefix}/*"
     }
-  }
+  ]
+}
 
-  depends_on = [aws_cloudwatch_log_group.auto_update]
+moved {
+  from = aws_iam_role.auto_update
+  to   = module.auto_update_lambda.aws_iam_role.this
+}
 
-  tags = {
-    Name = "${local.name_prefix}-auto-update"
-    Game = var.game_name
-  }
+moved {
+  from = aws_iam_role_policy.auto_update
+  to   = module.auto_update_lambda.aws_iam_role_policy.this
+}
+
+moved {
+  from = aws_cloudwatch_log_group.auto_update
+  to   = module.auto_update_lambda.aws_cloudwatch_log_group.this
+}
+
+moved {
+  from = aws_lambda_function.auto_update
+  to   = module.auto_update_lambda.aws_lambda_function.this
 }

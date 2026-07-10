@@ -282,7 +282,7 @@ variable "max_task_runtime_hours" {
     コストガードバックストップの閾値（時間）。
     この時間を超えて RUNNING なタスクを強制停止する。
     アイドル自動停止（monitor サイドカー）の代替ではなく最終安全網。
-    通常プレイ中に誤発動しないよう余裕を持った値（デフォルト 12 時間）を推奨。
+    通常プレイ中に誤発動しないよう余裕を持った値（デフォルト 24 時間）を推奨。
     max_runtime_hours > idle_timeout_minutes/60 となるよう設定すること。
   EOT
   type        = number

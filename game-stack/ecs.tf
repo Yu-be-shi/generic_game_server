@@ -30,8 +30,9 @@ resource "aws_ecs_cluster" "game" {
 
   tags = {
     Name = local.cluster_name
-    # Game タグ: control-plane の Discord ボットがこのタグでゲームを発見する
-    Game = var.game_name
+    # Game タグ: control-plane の Discord ボットがこのタグでゲームを発見する。
+    # ここでは明示指定していないが versions.tf の provider "aws" { default_tags } が
+    # 全リソースに Game = var.game_name を自動付与するため、最終的なタグは変わらない。
     # StatusParamPrefix タグ: /status コマンドが SSM パラメータを読む際のプレフィックス
     # monitor サイドカーが "/ggs/${local.name_prefix}/ready" 等に書き込む
     StatusParamPrefix = "/ggs/${local.name_prefix}"
@@ -187,7 +188,6 @@ resource "aws_ecs_task_definition" "game" {
 
   tags = {
     Name = local.name_prefix
-    Game = var.game_name
   }
 }
 
@@ -230,6 +230,5 @@ resource "aws_ecs_service" "game" {
 
   tags = {
     Name = local.service_name
-    Game = var.game_name
   }
 }

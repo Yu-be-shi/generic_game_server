@@ -63,57 +63,6 @@ output "backup_bucket_name" {
   value       = aws_s3_bucket.backup.id
 }
 
-output "server_management_commands" {
-  description = "サーバー管理 AWS CLI コマンド集（Discord ボット未使用時の手動操作）"
-  value       = <<-EOT
-
-    # === Discord コマンドが使えない場合の手動操作 ===
-
-    # 起動:
-    aws ecs update-service \
-      --cluster ${aws_ecs_cluster.game.name} \
-      --service ${aws_ecs_service.game.name} \
-      --desired-count 1 \
-      --region ${var.aws_region}
-
-    # 停止:
-    aws ecs update-service \
-      --cluster ${aws_ecs_cluster.game.name} \
-      --service ${aws_ecs_service.game.name} \
-      --desired-count 0 \
-      --region ${var.aws_region}
-
-    # 状態確認:
-    aws ecs describe-services \
-      --cluster ${aws_ecs_cluster.game.name} \
-      --services ${aws_ecs_service.game.name} \
-      --region ${var.aws_region} \
-      --query "services[0].{Status:status,Running:runningCount,Desired:desiredCount}"
-  EOT
-}
-
-output "cost_notification_test_command" {
-  description = <<-EOT
-    コスト通知の疎通テスト用コマンド。
-    実行すると SNS → Lambda(notify_cost) → Discord/Slack の経路を即検証できる。
-    AWS Budgets の実際のしきい値到達を待たずに通知経路を確認可能。
-  EOT
-  value       = <<-EOT
-
-    # === コスト通知の疎通テスト ===
-    # 下記コマンドを実行し、Discord/Slack にテストメッセージが届けば
-    # SNS → Lambda → webhook の経路が正常です。
-
-    aws sns publish \
-      --topic-arn ${aws_sns_topic.cost_alert.arn} \
-      --subject "コスト通知 疎通テスト" \
-      --message "これはテストです。Discord に届けば SNS→Lambda→webhook は正常です。" \
-      --region ${var.aws_region}
-
-    # DLQ 確認（Lambda 障害時のメッセージ蓄積を確認）:
-    aws sqs get-queue-attributes \
-      --queue-url $(aws sqs get-queue-url --queue-name ${aws_sqs_queue.notify_cost_dlq.name} --region ${var.aws_region} --query QueueUrl --output text) \
-      --attribute-names ApproximateNumberOfMessages \
-      --region ${var.aws_region}
-  EOT
-}
+# 手動操作・コスト通知疎通テストの AWS CLI コマンド集は CLAUDE.md
+# 「手動サーバー操作（Discord が使えない場合）」節を参照（ドリフトしやすい heredoc として
+# terraform output に埋め込むのではなく、ドキュメントとして一元管理する）。

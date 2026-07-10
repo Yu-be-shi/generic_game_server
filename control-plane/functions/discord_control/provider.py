@@ -36,6 +36,16 @@ import ed25519
 
 logger = logging.getLogger()
 
+# Discord のメッセージ上限は 2000 文字
+DISCORD_MESSAGE_LIMIT = 1990
+
+
+def _truncate(text: str, limit: int) -> str:
+    """limit 文字を超える場合は切り詰めて省略記号を付与する。"""
+    if len(text) > limit:
+        return text[:limit] + "\n...（省略）"
+    return text
+
 
 @dataclass
 class Request:
@@ -159,8 +169,7 @@ class DiscordProvider:
         ephemeral=True の場合はコマンド実行者のみに表示される。
         2000 文字を超える場合は末尾を切り詰める。
         """
-        if len(text) > 1990:
-            text = text[:1990] + "\n...（省略）"
+        text = _truncate(text, DISCORD_MESSAGE_LIMIT)
         return _json_response({
             "type": 4,
             "data": {
@@ -187,8 +196,7 @@ class DiscordProvider:
         PATCH /webhooks/{app_id}/{token}/messages/@original で「考え中…」を結果に上書きする。
         urllib.request を使用（外部依存ゼロ）。token の有効期限は 15 分。
         """
-        if len(text) > 1990:
-            text = text[:1990] + "\n...（省略）"
+        text = _truncate(text, DISCORD_MESSAGE_LIMIT)
         url  = f"https://discord.com/api/v10/webhooks/{app_id}/{token}/messages/@original"
         data = json.dumps({"content": text}).encode("utf-8")
         req  = urllib.request.Request(

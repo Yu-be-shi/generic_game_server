@@ -33,19 +33,19 @@ import base64
 import json
 import logging
 import os
-from calendar import monthrange
 from datetime import date, datetime, timedelta, timezone
 
 import boto3
 
+from aws_clients import client as _aws_client
+from ecs_net import get_running_task_public_ip
 from provider import get_provider
+from ssm_params import ssm_get, ssm_get_parameter, ssm_put
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 # --- 環境変数（Terraform の control-plane/main.tf から注入）---
-# Lambda が動いているリージョンより GAME_AWS_REGION を優先する
-AWS_REGION = os.environ.get("GAME_AWS_REGION") or os.environ.get("AWS_REGION", "ap-northeast-1")
 # カンマ区切りで許可ユーザーIDを受け取る。空の場合は全員許可
 # MESSAGING_ALLOWED_USER_IDS を優先し、なければ後方互換で DISCORD_ALLOWED_USER_IDS を参照
 _raw_ids = (
@@ -54,16 +54,16 @@ _raw_ids = (
 )
 ALLOWED_USER_IDS = set(uid.strip() for uid in _raw_ids.split(",") if uid.strip())
 
-ecs = boto3.client("ecs", region_name=AWS_REGION)
-ec2 = boto3.client("ec2", region_name=AWS_REGION)
-ssm = boto3.client("ssm", region_name=AWS_REGION)
+ecs = _aws_client("ecs")
+ec2 = _aws_client("ec2")
+ssm = _aws_client("ssm")
 # Cost Explorer / Budgets はグローバルサービスのため us-east-1 固定
 # AWS_REGION（ap-northeast-1）を流用すると EndpointResolutionError になる
 ce       = boto3.client("ce",      region_name="us-east-1")
 budgets  = boto3.client("budgets", region_name="us-east-1")
 sts_client = boto3.client("sts")
 # /update コマンド: game-stack の auto_update Worker Lambda を非同期 invoke するために使用
-lambda_client = boto3.client("lambda", region_name=AWS_REGION)
+lambda_client = _aws_client("lambda")
 
 # /status が「稼働中」に昇格するまでの猶予時間（秒）
 # ready=1 になってからこの時間が経過すれば、Webhook 通知済みでなくても「稼働中」を返す。
@@ -259,12 +259,9 @@ def _cmd_games() -> str:
 
 def _cmd_start(game_name: str) -> str:
     """/start game:<name>: サーバーを起動する"""
-    cluster_arn, service_arn = _find_service(game_name)
-    if not cluster_arn:
-        return (
-            f"❌ ゲーム `{game_name}` が見つかりません。\n"
-            "`/games` で利用可能なゲームを確認してください。"
-        )
+    cluster_arn, service_arn, err = _require_service(game_name)
+    if err:
+        return err
 
     svc = _describe_service(cluster_arn, service_arn)
     if svc and svc.get("desiredCount", 0) > 0:
@@ -274,17 +271,11 @@ def _cmd_start(game_name: str) -> str:
         )
 
     # 自動アップデート実行中は起動を拒否（EFS install への二重書き込み防止）
-    ssm_prefix_for_check = _get_cluster_tag(cluster_arn, "StatusParamPrefix")
-    if ssm_prefix_for_check:
-        try:
-            maint = ssm.get_parameter(Name=f"{ssm_prefix_for_check}/maintenance")["Parameter"]["Value"]
-            if maint == "1":
-                return (
-                    f"🔧 **{game_name}** はメンテナンス中（自動アップデート実行中）です。\n"
-                    "数分後に完了通知が届きます。それからお試しください。"
-                )
-        except Exception:
-            pass  # パラメータ未作成（初回）または取得失敗 → そのまま続行
+    if _is_under_maintenance(cluster_arn):
+        return (
+            f"🔧 **{game_name}** はメンテナンス中（自動アップデート実行中）です。\n"
+            "数分後に完了通知が届きます。それからお試しください。"
+        )
 
     # 常に最新タスク定義で起動する。
     # ecs.tf の ignore_changes=[task_definition] により terraform apply しても
@@ -313,12 +304,7 @@ def _cmd_start(game_name: str) -> str:
     ssm_prefix = _get_cluster_tag(cluster_arn, "StatusParamPrefix")
     if ssm_prefix:
         try:
-            ssm.put_parameter(
-                Name=f"{ssm_prefix}/ready",
-                Value="0",
-                Type="String",
-                Overwrite=True,
-            )
+            ssm_put(ssm, f"{ssm_prefix}/ready", "0")
             logger.info("/start: SSM ready を 0 にリセット: %s/ready", ssm_prefix)
         except Exception:
             logger.warning("/start: SSM ready のリセットに失敗（権限確認を）: %s/ready", ssm_prefix)
@@ -331,9 +317,9 @@ def _cmd_start(game_name: str) -> str:
 
 def _cmd_stop(game_name: str) -> str:
     """/stop game:<name>: サーバーを停止する"""
-    cluster_arn, service_arn = _find_service(game_name)
-    if not cluster_arn:
-        return f"❌ ゲーム `{game_name}` が見つかりません。"
+    cluster_arn, service_arn, err = _require_service(game_name)
+    if err:
+        return err
 
     ecs.update_service(cluster=cluster_arn, service=service_arn, desiredCount=0)
     return f"🛑 **{game_name}** の停止処理を開始しました。完全停止後に通知します。"
@@ -341,9 +327,9 @@ def _cmd_stop(game_name: str) -> str:
 
 def _cmd_status(game_name: str) -> str:
     """/status game:<name>: 稼働状態と現在の IP アドレスを返す"""
-    cluster_arn, service_arn = _find_service(game_name)
-    if not cluster_arn:
-        return f"❌ ゲーム `{game_name}` が見つかりません。"
+    cluster_arn, service_arn, err = _require_service(game_name)
+    if err:
+        return err
 
     svc = _describe_service(cluster_arn, service_arn)
     if not svc:
@@ -412,17 +398,21 @@ def _cmd_cost() -> str:
     """
     today       = date.today()
     month_start = today.replace(day=1)
-    tomorrow    = today + timedelta(days=1)
-
-    # 翌月1日（forecast の EndDate）
-    if today.month == 12:
-        next_month_first = date(today.year + 1, 1, 1)
-    else:
-        next_month_first = date(today.year, today.month + 1, 1)
 
     lines = [f"💰 **今月の AWS コスト** ({month_start.isoformat()} 〜 {today.isoformat()})\n"]
+    lines.append(_cost_mtd_line(today))
+    forecast_line = _cost_forecast_line(today)
+    if forecast_line:
+        lines.append(forecast_line)
+    lines.extend(_cost_budget_lines())
 
-    # --- 今月累計 (MTD) ---
+    return "\n".join(lines)
+
+
+def _cost_mtd_line(today: date) -> str:
+    """今月累計 (MTD) の1行を返す（取得失敗時もエラー文言の1行を返す）。"""
+    month_start = today.replace(day=1)
+    tomorrow    = today + timedelta(days=1)
     try:
         resp = ce.get_cost_and_usage(
             TimePeriod={"Start": month_start.isoformat(), "End": tomorrow.isoformat()},
@@ -430,54 +420,203 @@ def _cmd_cost() -> str:
             Metrics=["UnblendedCost"],
         )
         result_by_time = resp.get("ResultsByTime", [])
-        if result_by_time:
-            total = result_by_time[0]["Total"]["UnblendedCost"]
-            amount = float(total["Amount"])
-            unit   = total["Unit"]
-            lines.append(f"使用額（MTD）: **${amount:.2f} {unit}**")
+        if not result_by_time:
+            return "使用額（MTD）: 取得失敗"
+        total  = result_by_time[0]["Total"]["UnblendedCost"]
+        amount = float(total["Amount"])
+        unit   = total["Unit"]
+        return f"使用額（MTD）: **${amount:.2f} {unit}**"
     except Exception:
         logger.exception("Cost Explorer: MTD 取得失敗")
-        lines.append("使用額（MTD）: 取得失敗")
+        return "使用額（MTD）: 取得失敗"
 
-    # --- 月末着地予測 ---
-    # 履歴が少ない（新アカウント等）と DataUnavailableException が送出されるためスキップ
+
+def _cost_forecast_line(today: date):
+    """
+    月末着地予測の1行を返す。
+    履歴が少ない（新アカウント等）と DataUnavailableException が送出されるため None（サイレントスキップ）。
+    """
+    if today.month == 12:
+        next_month_first = date(today.year + 1, 1, 1)
+    else:
+        next_month_first = date(today.year, today.month + 1, 1)
+
     try:
         forecast_resp = ce.get_cost_forecast(
             TimePeriod={"Start": today.isoformat(), "End": next_month_first.isoformat()},
             Metric="UNBLENDED_COST",
             Granularity="MONTHLY",
         )
-        forecast_total = forecast_resp.get("Total", {})
+        forecast_total  = forecast_resp.get("Total", {})
         forecast_amount = float(forecast_total.get("Amount", 0))
         forecast_unit   = forecast_total.get("Unit", "USD")
-        lines.append(f"月末着地予測: **${forecast_amount:.2f} {forecast_unit}**")
+        return f"月末着地予測: **${forecast_amount:.2f} {forecast_unit}**"
     except Exception:
         # 履歴不足等で予測が取れない場合はサイレントスキップ
         logger.info("Cost Explorer: 予測取得失敗（履歴不足の可能性）")
+        return None
 
-    # --- 予算と残額 ---
+
+def _cost_budget_lines() -> list:
+    """予算と残額の行リストを返す（未設定なら1行、取得失敗なら空リスト）。"""
     try:
-        account_id = sts_client.get_caller_identity()["Account"]
-        b_resp   = budgets.describe_budgets(AccountId=account_id)
+        account_id  = sts_client.get_caller_identity()["Account"]
+        b_resp      = budgets.describe_budgets(AccountId=account_id)
         budget_list = b_resp.get("Budgets", [])
-        if budget_list:
-            lines.append("")  # 空行
-            for b in budget_list:
-                name  = b.get("BudgetName", "")
-                limit = float(b.get("BudgetLimit", {}).get("Amount", 0))
-                limit_unit = b.get("BudgetLimit", {}).get("Unit", "USD")
-                actual    = float(b.get("CalculatedSpend", {}).get("ActualSpend", {}).get("Amount", 0))
-                remaining = limit - actual
-                lines.append(
-                    f"📊 **{name}**\n"
-                    f"  予算: ${limit:.2f} / 使用: ${actual:.2f} / 残: ${remaining:.2f} {limit_unit}"
-                )
-        else:
-            lines.append("（予算未設定）")
+        if not budget_list:
+            return ["（予算未設定）"]
+
+        lines = [""]  # 空行
+        for b in budget_list:
+            name       = b.get("BudgetName", "")
+            limit      = float(b.get("BudgetLimit", {}).get("Amount", 0))
+            limit_unit = b.get("BudgetLimit", {}).get("Unit", "USD")
+            actual     = float(b.get("CalculatedSpend", {}).get("ActualSpend", {}).get("Amount", 0))
+            remaining  = limit - actual
+            lines.append(
+                f"📊 **{name}**\n"
+                f"  予算: ${limit:.2f} / 使用: ${actual:.2f} / 残: ${remaining:.2f} {limit_unit}"
+            )
+        return lines
     except Exception:
         logger.exception("Budgets: 取得失敗")
+        return []
 
-    return "\n".join(lines)
+
+# =============================================================================
+# コマンド共通ヘルパー（find/guard/invoke のボイラープレートを集約）
+# =============================================================================
+
+def _require_service(game_name: str):
+    """
+    ゲームサービスを検索する。
+    見つかった場合は (cluster_arn, service_arn, None) を、
+    見つからない場合は (None, None, エラーメッセージ) を返す。
+    """
+    cluster_arn, service_arn = _find_service(game_name)
+    if not cluster_arn:
+        return None, None, (
+            f"❌ ゲーム `{game_name}` が見つかりません。\n"
+            "`/games` で利用可能なゲームを確認してください。"
+        )
+    return cluster_arn, service_arn, None
+
+
+def _reject_if_running(cluster_arn: str, service_arn: str, game_name: str, action_verb: str):
+    """サービス起動中なら拒否メッセージを返す。起動中でなければ None を返す。"""
+    svc = _describe_service(cluster_arn, service_arn)
+    if svc and svc.get("desiredCount", 0) > 0:
+        return (
+            f"⚠️ **{game_name}** は現在起動中です。\n"
+            f"`/stop game:{game_name}` で停止してから{action_verb}してください。"
+        )
+    return None
+
+
+def _is_under_maintenance(cluster_arn: str) -> bool:
+    """メンテナンス中（別の /update 等が実行中）かどうかを SSM から判定する。"""
+    ssm_prefix = _get_cluster_tag(cluster_arn, "StatusParamPrefix")
+    if not ssm_prefix:
+        return False
+    try:
+        return ssm_get(ssm, f"{ssm_prefix}/maintenance") == "1"
+    except Exception:
+        return False  # パラメータ未作成（初回）または取得失敗 → メンテナンス中ではないとみなす
+
+
+def _require_cluster_tag(cluster_arn: str, tag_key: str, game_name: str):
+    """
+    クラスタータグを取得する。
+    見つかった場合は (値, None) を、見つからない場合は (None, エラーメッセージ) を返す。
+    """
+    value = _get_cluster_tag(cluster_arn, tag_key)
+    if not value:
+        return None, (
+            f"❌ **{game_name}** の {tag_key} タグが見つかりません。\n"
+            "`game-stack` の `terraform apply` を実行してください。"
+        )
+    return value, None
+
+
+def _invoke_worker_async(
+    function_name: str,
+    payload: dict,
+    log_message: str,
+    error_return: str,
+    error_log_message: str,
+):
+    """
+    Worker Lambda を非同期 invoke する（Discord 3秒制限内で即応答するため Event モード）。
+    成功時は log_message をログに出し None を返す。失敗時は error_log_message を
+    例外付きでログに出し、error_return をそのまま返す。
+    """
+    try:
+        lambda_client.invoke(
+            FunctionName=function_name,
+            InvocationType="Event",
+            Payload=json.dumps(payload).encode("utf-8"),
+        )
+        logger.info(log_message)
+        return None
+    except Exception:
+        logger.exception(error_log_message)
+        return error_return
+
+
+def _guarded_worker_invoke(
+    game_name: str,
+    tag_key: str,
+    payload: dict,
+    log_message,
+    error_return: str,
+    error_log_message,
+    success_message,
+    require_stopped: bool = True,
+    action_verb: str = "",
+) -> str:
+    """
+    /update・/backup・/restore・/switch-slot に共通するガード列を実行する:
+      1. サービス検索（_require_service）
+      2. require_stopped=True の場合のみ:
+         a. 起動中なら拒否（_reject_if_running。action_verb をメッセージに埋め込む）
+         b. メンテナンス中（別の /update 実行中）なら固定メッセージで拒否
+         （/backup はファイル読み取りのみで安全なため require_stopped=False で呼ぶ）
+      3. tag_key のクラスタータグから Worker Lambda 名を取得（_require_cluster_tag）
+      4. Worker Lambda を非同期 invoke（_invoke_worker_async）。
+         log_message / error_log_message / success_message は worker_function が
+         判明してから組み立てる必要があるため、str ではなく
+         `worker_function -> str` の callable として受け取る。
+    """
+    cluster_arn, service_arn, err = _require_service(game_name)
+    if err:
+        return err
+
+    if require_stopped:
+        err = _reject_if_running(cluster_arn, service_arn, game_name, action_verb)
+        if err:
+            return err
+
+        if _is_under_maintenance(cluster_arn):
+            return (
+                f"🔧 **{game_name}** はすでにアップデート中です。\n"
+                "完了通知が届くまでお待ちください。"
+            )
+
+    worker_function, err = _require_cluster_tag(cluster_arn, tag_key, game_name)
+    if err:
+        return err
+
+    err = _invoke_worker_async(
+        worker_function,
+        payload,
+        log_message=log_message(worker_function),
+        error_return=error_return,
+        error_log_message=error_log_message(worker_function),
+    )
+    if err:
+        return err
+
+    return success_message(worker_function)
 
 
 def _cmd_update(game_name: str) -> str:
@@ -496,61 +635,24 @@ def _cmd_update(game_name: str) -> str:
       5. Worker を非同期 invoke（Discord 3秒制限内で即応答するため Event モード）
       6. 「🔄 開始しました」を返す（完了通知は Worker から Webhook で届く）
     """
-    cluster_arn, service_arn = _find_service(game_name)
-    if not cluster_arn:
-        return (
-            f"❌ ゲーム `{game_name}` が見つかりません。\n"
-            "`/games` で利用可能なゲームを確認してください。"
-        )
-
-    # サービス起動中は拒否（ゲームプロセスが EFS を使用中）
-    svc = _describe_service(cluster_arn, service_arn)
-    if svc and svc.get("desiredCount", 0) > 0:
-        return (
-            f"⚠️ **{game_name}** は現在起動中です。\n"
-            f"`/stop game:{game_name}` で停止してからアップデートしてください。"
-        )
-
-    # メンテナンス中（別の update が実行中）は拒否
-    ssm_prefix = _get_cluster_tag(cluster_arn, "StatusParamPrefix")
-    if ssm_prefix:
-        try:
-            maint = ssm.get_parameter(Name=f"{ssm_prefix}/maintenance")["Parameter"]["Value"]
-            if maint == "1":
-                return (
-                    f"🔧 **{game_name}** はすでにアップデート中です。\n"
-                    "完了通知が届くまでお待ちください。"
-                )
-        except Exception:
-            pass  # パラメータ未作成（初回）または取得失敗 → そのまま続行
-
-    # AutoUpdateFunction タグから Worker Lambda 名を取得
-    worker_function = _get_cluster_tag(cluster_arn, "AutoUpdateFunction")
-    if not worker_function:
-        return (
-            f"❌ **{game_name}** の AutoUpdateFunction タグが見つかりません。\n"
-            "`game-stack` の `terraform apply` を実行してください。"
-        )
-
-    # Worker Lambda を非同期 invoke（Discord 3秒制限内で即応答するため Event モード）
-    try:
-        lambda_client.invoke(
-            FunctionName=worker_function,
-            InvocationType="Event",  # 非同期: StatusCode=202 → すぐに返る
-            Payload=json.dumps({"game_name": game_name}).encode("utf-8"),
-        )
-        logger.info("auto_update Worker を非同期 invoke: function=%s game=%s", worker_function, game_name)
-    except Exception:
-        logger.exception("Worker Lambda の invoke に失敗: %s", worker_function)
-        return (
+    return _guarded_worker_invoke(
+        game_name,
+        tag_key="AutoUpdateFunction",
+        action_verb="アップデート",
+        payload={"game_name": game_name},
+        log_message=lambda worker_function: (
+            f"auto_update Worker を非同期 invoke: function={worker_function} game={game_name}"
+        ),
+        error_return=(
             f"❌ **{game_name}** のアップデート Worker の起動に失敗しました。\n"
             "IAM 権限または Lambda 設定を確認してください。"
-        )
-
-    return (
-        f"🔄 **{game_name}** のアップデートを開始しました。\n"
-        "SteamCMD でサーバーを更新中です。完了したら通知します（数分かかります）。\n"
-        "アップデート中は `/start` できません。"
+        ),
+        error_log_message=lambda worker_function: f"Worker Lambda の invoke に失敗: {worker_function}",
+        success_message=lambda worker_function: (
+            f"🔄 **{game_name}** のアップデートを開始しました。\n"
+            "SteamCMD でサーバーを更新中です。完了したら通知します（数分かかります）。\n"
+            "アップデート中は `/start` できません。"
+        ),
     )
 
 
@@ -562,38 +664,24 @@ def _cmd_backup(game_name: str) -> str:
     それを待たずに任意のタイミングで手動実行したい場合に使う。
     ファイルを読むだけの処理のため、サーバー起動中でも実行可能（定期バックアップと同じ扱い）。
     """
-    cluster_arn, service_arn = _find_service(game_name)
-    if not cluster_arn:
-        return (
-            f"❌ ゲーム `{game_name}` が見つかりません。\n"
-            "`/games` で利用可能なゲームを確認してください。"
-        )
-
-    backup_function = _get_cluster_tag(cluster_arn, "BackupFunction")
-    if not backup_function:
-        return (
-            f"❌ **{game_name}** の BackupFunction タグが見つかりません。\n"
-            "`game-stack` の `terraform apply` を実行してください。"
-        )
-
-    try:
-        lambda_client.invoke(
-            FunctionName=backup_function,
-            InvocationType="Event",  # 非同期: StatusCode=202 → すぐに返る
-            Payload=json.dumps({"action": "backup"}).encode("utf-8"),
-        )
-        logger.info("backup_efs(backup) を非同期 invoke: function=%s game=%s", backup_function, game_name)
-    except Exception:
-        logger.exception("Backup Lambda の invoke に失敗: %s", backup_function)
-        return (
+    return _guarded_worker_invoke(
+        game_name,
+        tag_key="BackupFunction",
+        require_stopped=False,
+        payload={"action": "backup"},
+        log_message=lambda worker_function: (
+            f"backup_efs(backup) を非同期 invoke: function={worker_function} game={game_name}"
+        ),
+        error_return=(
             f"❌ **{game_name}** のバックアップ実行に失敗しました。\n"
             "IAM 権限または Lambda 設定を確認してください。"
-        )
-
-    return (
-        f"💾 **{game_name}** のバックアップ（EFS→S3）を開始しました。\n"
-        "完了通知は届きません（数秒〜数十秒で完了します）。結果を確認したい場合は "
-        f"CloudWatch Logs `/aws/lambda/{backup_function}` を参照してください。"
+        ),
+        error_log_message=lambda worker_function: f"Backup Lambda の invoke に失敗: {worker_function}",
+        success_message=lambda worker_function: (
+            f"💾 **{game_name}** のバックアップ（EFS→S3）を開始しました。\n"
+            "完了通知は届きません（数秒〜数十秒で完了します）。結果を確認したい場合は "
+            f"CloudWatch Logs `/aws/lambda/{worker_function}` を参照してください。"
+        ),
     )
 
 
@@ -603,50 +691,29 @@ def _cmd_restore(game_name: str) -> str:
 
     危険な操作のため:
       - サーバー起動中は拒否する（ゲームプロセスが EFS を使用中の書き込み競合を防ぐ）
+      - メンテナンス中（/update 実行中）も拒否する（EFS への同時書き込み競合を防ぐ）
       - 実行前に現在の EFS 内容を丸ごと S3 の _pre_restore_snapshot/ へ退避してから上書きする
       - S3 に存在しないファイルの削除は行わない（追加・上書きのみの安全側動作）
     """
-    cluster_arn, service_arn = _find_service(game_name)
-    if not cluster_arn:
-        return (
-            f"❌ ゲーム `{game_name}` が見つかりません。\n"
-            "`/games` で利用可能なゲームを確認してください。"
-        )
-
-    # サービス起動中は拒否（ゲームプロセスが EFS を使用中）
-    svc = _describe_service(cluster_arn, service_arn)
-    if svc and svc.get("desiredCount", 0) > 0:
-        return (
-            f"⚠️ **{game_name}** は現在起動中です。\n"
-            f"`/stop game:{game_name}` で停止してから実行してください。"
-        )
-
-    backup_function = _get_cluster_tag(cluster_arn, "BackupFunction")
-    if not backup_function:
-        return (
-            f"❌ **{game_name}** の BackupFunction タグが見つかりません。\n"
-            "`game-stack` の `terraform apply` を実行してください。"
-        )
-
-    try:
-        lambda_client.invoke(
-            FunctionName=backup_function,
-            InvocationType="Event",  # 非同期: StatusCode=202 → すぐに返る
-            Payload=json.dumps({"action": "restore_all"}).encode("utf-8"),
-        )
-        logger.info("backup_efs(restore_all) を非同期 invoke: function=%s game=%s", backup_function, game_name)
-    except Exception:
-        logger.exception("Restore Lambda の invoke に失敗: %s", backup_function)
-        return (
+    return _guarded_worker_invoke(
+        game_name,
+        tag_key="BackupFunction",
+        action_verb="実行",
+        payload={"action": "restore_all"},
+        log_message=lambda worker_function: (
+            f"backup_efs(restore_all) を非同期 invoke: function={worker_function} game={game_name}"
+        ),
+        error_return=(
             f"❌ **{game_name}** の復元実行に失敗しました。\n"
             "IAM 権限または Lambda 設定を確認してください。"
-        )
-
-    return (
-        f"♻️ **{game_name}** の復元（S3→EFS）を開始しました。\n"
-        "実行前の内容は自動的に S3 の `_pre_restore_snapshot/` へ退避済みです。\n"
-        "完了通知は届きません。結果を確認したい場合は "
-        f"CloudWatch Logs `/aws/lambda/{backup_function}` を参照してください。"
+        ),
+        error_log_message=lambda worker_function: f"Restore Lambda の invoke に失敗: {worker_function}",
+        success_message=lambda worker_function: (
+            f"♻️ **{game_name}** の復元（S3→EFS）を開始しました。\n"
+            "実行前の内容は自動的に S3 の `_pre_restore_snapshot/` へ退避済みです。\n"
+            "完了通知は届きません。結果を確認したい場合は "
+            f"CloudWatch Logs `/aws/lambda/{worker_function}` を参照してください。"
+        ),
     )
 
 
@@ -660,53 +727,30 @@ def _cmd_switch_slot(game_name: str, slot: str) -> str:
 
     危険な操作のため:
       - サーバー起動中は拒否する（ゲームプロセスがセーブデータを使用中の書き込み競合を防ぐ）
+      - メンテナンス中（/update 実行中）も拒否する（EFS への同時書き込み競合を防ぐ）
       - 切り替え前に現在のスロットの内容を自動的に S3 の slots/<現スロット>/ へ保存する
       - 切り替え先スロットが未使用の場合は空のワールドとして起動する（新規ワールド扱い）
     """
-    cluster_arn, service_arn = _find_service(game_name)
-    if not cluster_arn:
-        return (
-            f"❌ ゲーム `{game_name}` が見つかりません。\n"
-            "`/games` で利用可能なゲームを確認してください。"
-        )
-
-    # サービス起動中は拒否（ゲームプロセスがセーブデータを使用中）
-    svc = _describe_service(cluster_arn, service_arn)
-    if svc and svc.get("desiredCount", 0) > 0:
-        return (
-            f"⚠️ **{game_name}** は現在起動中です。\n"
-            f"`/stop game:{game_name}` で停止してから実行してください。"
-        )
-
-    backup_function = _get_cluster_tag(cluster_arn, "BackupFunction")
-    if not backup_function:
-        return (
-            f"❌ **{game_name}** の BackupFunction タグが見つかりません。\n"
-            "`game-stack` の `terraform apply` を実行してください。"
-        )
-
-    try:
-        lambda_client.invoke(
-            FunctionName=backup_function,
-            InvocationType="Event",  # 非同期: StatusCode=202 → すぐに返る
-            Payload=json.dumps({"action": "switch_slot", "slot": slot}).encode("utf-8"),
-        )
-        logger.info(
-            "backup_efs(switch_slot) を非同期 invoke: function=%s game=%s slot=%s",
-            backup_function, game_name, slot,
-        )
-    except Exception:
-        logger.exception("Switch slot Lambda の invoke に失敗: %s", backup_function)
-        return (
+    return _guarded_worker_invoke(
+        game_name,
+        tag_key="BackupFunction",
+        action_verb="実行",
+        payload={"action": "switch_slot", "slot": slot},
+        log_message=lambda worker_function: (
+            f"backup_efs(switch_slot) を非同期 invoke: "
+            f"function={worker_function} game={game_name} slot={slot}"
+        ),
+        error_return=(
             f"❌ **{game_name}** のスロット切り替えに失敗しました。\n"
             "IAM 権限または Lambda 設定を確認してください。"
-        )
-
-    return (
-        f"🔀 **{game_name}** のセーブデータを `{slot}` へ切り替え中です。\n"
-        "切り替え前の内容は自動的に S3 の `slots/` 配下へ保存されています。\n"
-        "完了通知は届きません。結果を確認したい場合は "
-        f"CloudWatch Logs `/aws/lambda/{backup_function}` を参照してください。"
+        ),
+        error_log_message=lambda worker_function: f"Switch slot Lambda の invoke に失敗: {worker_function}",
+        success_message=lambda worker_function: (
+            f"🔀 **{game_name}** のセーブデータを `{slot}` へ切り替え中です。\n"
+            "切り替え前の内容は自動的に S3 の `slots/` 配下へ保存されています。\n"
+            "完了通知は届きません。結果を確認したい場合は "
+            f"CloudWatch Logs `/aws/lambda/{worker_function}` を参照してください。"
+        ),
     )
 
 
@@ -873,40 +917,7 @@ def _get_running_task_info(cluster_arn: str):
     どちらかを取得できない場合は対応する要素を None にして返す。
     """
     try:
-        task_arns = ecs.list_tasks(cluster=cluster_arn, desiredStatus="RUNNING")["taskArns"]
-        if not task_arns:
-            return None, None, None
-
-        tasks = ecs.describe_tasks(cluster=cluster_arn, tasks=task_arns[:1])["tasks"]
-        if not tasks:
-            return None, None, None
-
-        task         = tasks[0]
-        task_def_arn = task.get("taskDefinitionArn")
-        task_arn     = task.get("taskArn")
-
-        # attachments から ENI ID を探す
-        # type は "ElasticNetworkInterface" または "eni"（API バージョンにより異なる）
-        # notify_ip.py と同じ判定ロジックに統一して /status の IP 取得漏れを防ぐ
-        eni_id = None
-        for attachment in task.get("attachments", []):
-            if attachment.get("type") not in ("ElasticNetworkInterface", "eni"):
-                continue
-            for detail in attachment.get("details", []):
-                if detail.get("name") == "networkInterfaceId":
-                    eni_id = detail.get("value")
-                    break
-
-        if not eni_id:
-            return None, task_def_arn, task_arn
-
-        interfaces = ec2.describe_network_interfaces(NetworkInterfaceIds=[eni_id])["NetworkInterfaces"]
-        if not interfaces:
-            return None, task_def_arn, task_arn
-
-        public_ip = interfaces[0].get("Association", {}).get("PublicIp")
-        return public_ip, task_def_arn, task_arn
-
+        return get_running_task_public_ip(ecs, ec2, cluster_arn)
     except Exception:
         logger.exception("タスク情報取得失敗")
         return None, None, None
@@ -941,20 +952,22 @@ def _get_ssm_status(prefix: str):
     ready_age_seconds = None
 
     try:
-        ready_resp = ssm.get_parameter(Name=f"{prefix}/ready")
-        param      = ready_resp["Parameter"]
-        ready      = param["Value"] == "1"
-        if ready:
-            last_modified     = param["LastModifiedDate"]  # timezone-aware datetime
-            ready_age_seconds = (datetime.now(timezone.utc) - last_modified).total_seconds()
+        param = ssm_get_parameter(ssm, f"{prefix}/ready")
+        if param is None:
+            logger.debug("SSM ready パラメータ未取得（初回起動前か権限不足）: %s/ready", prefix)
+        else:
+            ready = param["Value"] == "1"
+            if ready:
+                last_modified     = param["LastModifiedDate"]  # timezone-aware datetime
+                ready_age_seconds = (datetime.now(timezone.utc) - last_modified).total_seconds()
     except Exception:
         # ParameterNotFound（初回起動前）は想定内、それ以外はデバッグログ
         logger.debug("SSM ready パラメータ未取得（初回起動前か権限不足）: %s/ready", prefix)
 
     if ready:
         try:
-            players_resp = ssm.get_parameter(Name=f"{prefix}/players")
-            players      = int(players_resp["Parameter"]["Value"])
+            players_value = ssm_get(ssm, f"{prefix}/players")
+            players = int(players_value) if players_value is not None else None
         except ValueError:
             logger.warning("SSM players の値が整数ではありません: %s/players", prefix)
         except Exception:
@@ -972,6 +985,6 @@ def _get_notified_task(prefix: str):
     未通知（パラメータ未存在）の場合は None を返す。
     """
     try:
-        return ssm.get_parameter(Name=f"{prefix}/notified_task")["Parameter"]["Value"]
+        return ssm_get(ssm, f"{prefix}/notified_task")
     except Exception:
         return None

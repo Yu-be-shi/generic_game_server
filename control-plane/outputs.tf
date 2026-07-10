@@ -14,7 +14,7 @@ output "interactions_endpoint_url" {
 
 output "lambda_function_name" {
   description = "Discord コントロール Lambda 関数名"
-  value       = aws_lambda_function.discord_control.function_name
+  value       = module.discord_control_lambda.function_name
 }
 
 output "shared_vpc_id" {

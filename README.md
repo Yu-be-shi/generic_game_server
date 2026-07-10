@@ -150,6 +150,9 @@ terraform apply -var-file=../games/palworld.tfvars
 | `/status game:palworld` | 現在のIP アドレスを確認 |
 | `/cost` | 今月の AWS コストと予算残高を確認 |
 | `/update game:palworld` | サーバーを最新バージョンにアップデート（停止中の場合のみ実行可） |
+| `/backup game:palworld` | 今すぐ EFS→S3 のバックアップを実行 |
+| `/restore game:palworld` | S3→EFS へ最新バックアップをミラーリング（停止中のみ実行可） |
+| `/switch-slot game:palworld slot:world2` | セーブデータのスロットを切り替え（停止中のみ実行可） |
 
 > コマンドはあなただけに見えるメッセージ（エフェメラル）で応答するため、他のメンバーには表示されない。
 
@@ -303,7 +306,8 @@ generic_game_server/
 │   ├── backup.tf                       # S3 バックアップバケット / バックアップ Lambda / EventBridge
 │   ├── iam.tf                          # タスク実行ロール / タスクロール
 │   ├── ecs.tf                          # ECS クラスター / タスク定義 / サービス
-│   ├── notifications.tf                # IP通知 Lambda / コスト通知 Lambda / SNS / Budgets
+│   ├── cost_alerts.tf                   # コスト通知 Lambda / SNS / Budgets
+│   ├── notify_ip.tf                     # IP通知 Lambda
 │   ├── auto_update.tf                  # 手動アップデート Worker Lambda
 │   ├── cost_guard.tf                   # 長時間稼働強制停止バックストップ Lambda
 │   ├── outputs.tf                      # 接続情報 / 管理コマンド
@@ -327,7 +331,7 @@ generic_game_server/
 │   ├── outputs.tf                      # interactions_endpoint_url（Portal への登録値）
 │   ├── functions/
 │   │   └── discord_control/
-│   │       ├── index.py                # Discord Interactions ハンドラ（6 コマンド）
+│   │       ├── index.py                # Discord Interactions ハンドラ（9 コマンド）
 │   │       ├── ed25519.py              # 署名検証（外部ライブラリ不要）
 │   │       └── provider.py             # Discord 固有プロトコル抽象層
 │   └── scripts/

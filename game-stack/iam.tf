@@ -2,6 +2,18 @@
 # iam.tf - ECS タスク用 IAM ロール
 # ============================================================
 
+locals {
+  # タスク実行ロール・タスクロール共通の assume-role ポリシー
+  ecs_tasks_assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "ecs-tasks.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
 # -----------------------------------------------------------
 # ① タスク実行ロール
 #    Fargate がコンテナイメージ pull・CloudWatch Logs への書き込みに使用する。
@@ -11,14 +23,7 @@
 resource "aws_iam_role" "task_execution" {
   name = "${local.name_prefix}-task-exec"
 
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect    = "Allow"
-      Principal = { Service = "ecs-tasks.amazonaws.com" }
-      Action    = "sts:AssumeRole"
-    }]
-  })
+  assume_role_policy = local.ecs_tasks_assume_role_policy
 
   tags = {
     Name = "${local.name_prefix}-task-exec"
@@ -39,14 +44,7 @@ resource "aws_iam_role_policy_attachment" "task_execution" {
 resource "aws_iam_role" "task" {
   name = "${local.name_prefix}-task"
 
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect    = "Allow"
-      Principal = { Service = "ecs-tasks.amazonaws.com" }
-      Action    = "sts:AssumeRole"
-    }]
-  })
+  assume_role_policy = local.ecs_tasks_assume_role_policy
 
   tags = {
     Name = "${local.name_prefix}-task"

@@ -32,12 +32,11 @@ import json
 import logging
 import os
 import time
-import urllib.error
 import urllib.request
 
-import boto3
-
-from notifier import send_message
+from aws_clients import client as _aws_client
+from notifier import send_message_safe
+from ssm_params import ssm_get, ssm_put
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -45,7 +44,6 @@ logger.setLevel(logging.INFO)
 # ---------------------------------------------------------------
 # 環境変数（Terraform の game-stack/auto_update.tf から注入）
 # ---------------------------------------------------------------
-AWS_REGION        = os.environ.get("AWS_REGION", "ap-northeast-1")
 CLUSTER_ARN       = os.environ["CLUSTER_ARN"]
 SERVICE_NAME      = os.environ["SERVICE_NAME"]
 TASK_DEF_FAMILY   = os.environ["TASK_DEF_FAMILY"]   # = local.name_prefix
@@ -75,8 +73,8 @@ STARTED_BY = "ggs-auto-update"
 POLL_INTERVAL_S = 15      # SSM update_ready をチェックする間隔（秒）
 POLL_TIMEOUT_S  = 720     # ポーリング上限（12分）。Lambda timeout(900s) より余裕を持たせる
 
-ecs = boto3.client("ecs", region_name=AWS_REGION)
-ssm = boto3.client("ssm", region_name=AWS_REGION)
+ecs = _aws_client("ecs")
+ssm = _aws_client("ssm")
 
 
 def lambda_handler(event, context):
@@ -93,7 +91,7 @@ def lambda_handler(event, context):
     # 1. ガード: サーバーが起動中またはメンテ中なら中止（EFS 二重書き込み防止）
     if _server_running():
         msg = f"⚠️ **{GAME_NAME}** はすでに起動中のためアップデートをスキップしました。"
-        _safe_send(msg)
+        send_message_safe(msg)
         return {"status": "skipped_running"}
 
     # 2. Steam バージョン事前チェック（STEAM_APP_ID 設定時のみ）
@@ -109,7 +107,7 @@ def lambda_handler(event, context):
             logger.info(
                 "Steam バージョンチェック: 最新 build=%s = インストール済み → スキップ", installed
             )
-            _safe_send(msg)
+            send_message_safe(msg)
             return {"status": "skipped_up_to_date", "buildId": installed}
         logger.info(
             "Steam バージョンチェック: latest=%s installed=%s → アップデート実行",
@@ -157,13 +155,13 @@ def lambda_handler(event, context):
 
     # 8. 完了通知
     if success:
-        _safe_send(
+        send_message_safe(
             f"✅ **{GAME_NAME}** のサーバーアップデートが完了しました！\n"
             f"`/start game:{GAME_NAME}` で起動できます。"
         )
         return {"status": "done", "taskArn": task_arn}
     else:
-        _safe_send(
+        send_message_safe(
             f"⚠️ **{GAME_NAME}** のアップデートがタイムアウトしました。\n"
             "更新が適用されていない可能性があります。CloudWatch Logs を確認してください。"
         )
@@ -280,14 +278,15 @@ def _poll_ready(context) -> bool:
             return False
 
         try:
-            value = ssm.get_parameter(Name=UPDATE_READY_PARAM)["Parameter"]["Value"]
+            value = ssm_get(ssm, UPDATE_READY_PARAM)
             if value == "1":
                 logger.info("update_ready=1 を確認（経過: %d 秒）", elapsed)
                 return True
-            logger.debug("update_ready=%s 待機中（経過: %d 秒）", value, elapsed)
-        except ssm.exceptions.ParameterNotFound:
-            # monitor の dnf install 完了前は存在しない。正常な待機状態
-            logger.debug("ParameterNotFound（monitor セットアップ中）。待機継続（経過: %d 秒）", elapsed)
+            elif value is None:
+                # monitor の dnf install 完了前は存在しない。正常な待機状態
+                logger.debug("ParameterNotFound（monitor セットアップ中）。待機継続（経過: %d 秒）", elapsed)
+            else:
+                logger.debug("update_ready=%s 待機中（経過: %d 秒）", value, elapsed)
         except Exception:
             logger.exception("get_parameter 失敗（継続）")
 
@@ -345,12 +344,12 @@ def _installed_buildid() -> "str | None":
     未保存（初回/manifest 未検出）の場合は None を返す（fail-open: アップデートを実行）。
     """
     try:
-        value = ssm.get_parameter(Name=INSTALLED_BUILDID_PARAM)["Parameter"]["Value"]
+        value = ssm_get(ssm, INSTALLED_BUILDID_PARAM)
+        if value is None:
+            logger.info("installed_buildid 未保存（初回 install 前、またはマニフェスト未検出）")
+            return None
         logger.info("SSM installed_buildid=%s", value)
         return value or None
-    except ssm.exceptions.ParameterNotFound:
-        logger.info("installed_buildid 未保存（初回 install 前、またはマニフェスト未検出）")
-        return None
     except Exception:
         logger.warning("installed_buildid の取得に失敗しました（fail-open）", exc_info=True)
         return None
@@ -359,15 +358,9 @@ def _installed_buildid() -> "str | None":
 def _put(name: str, value: str) -> None:
     """SSM パラメータを上書きする。失敗しても継続（ログに警告）。"""
     try:
-        ssm.put_parameter(Name=name, Value=value, Type="String", Overwrite=True)
+        ssm_put(ssm, name, value)
         logger.debug("SSM put: %s = %s", name, value)
     except Exception:
         logger.warning("SSM put_parameter 失敗: name=%s value=%s", name, value, exc_info=True)
 
 
-def _safe_send(text: str) -> None:
-    """Discord Webhook 通知（失敗しても処理を継続する）。"""
-    try:
-        send_message(text)
-    except Exception:
-        logger.warning("通知送信失敗（継続）: %s", text[:80], exc_info=True)

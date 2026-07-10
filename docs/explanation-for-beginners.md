@@ -121,7 +121,7 @@ Lambda: notify_ip
 ユーザーに「接続先: X.X.X.X:8211」と通知
 ```
 
-関係ファイル: `game-stack/scripts/auto_shutdown.sh`, `game-stack/notifications.tf`, `game-stack/functions/notify_ip/notify_ip.py`
+関係ファイル: `game-stack/scripts/auto_shutdown.sh`, `game-stack/notify_ip.tf`, `game-stack/functions/notify_ip/notify_ip.py`
 
 ---
 
@@ -141,7 +141,7 @@ Lambda: notify_ip
   ↓ Discord に停止通知
 ```
 
-関係ファイル: `game-stack/scripts/auto_shutdown.sh`, `game-stack/notifications.tf`
+関係ファイル: `game-stack/scripts/auto_shutdown.sh`, `game-stack/notify_ip.tf`
 
 ---
 
@@ -182,7 +182,7 @@ Lambda: notify_ip
   「今月 80% 消費しました」等のアラートが来る
 ```
 
-関係ファイル: `game-stack/cost_guard.tf`, `game-stack/functions/cost_guard/cost_guard.py`, `game-stack/notifications.tf`, `game-stack/functions/notify_cost/notify_cost.py`
+関係ファイル: `game-stack/cost_guard.tf`, `game-stack/functions/cost_guard/cost_guard.py`, `game-stack/cost_alerts.tf`, `game-stack/functions/notify_cost/notify_cost.py`
 
 ---
 
@@ -230,7 +230,8 @@ generic_game_server/
 │   ├── backup.tf            　 S3 + backup Lambda
 │   ├── auto_update.tf       　 アップデート Lambda
 │   ├── cost_guard.tf        　 コストガード Lambda
-│   ├── notifications.tf     　 IP 通知・コスト通知・Budgets
+│   ├── cost_alerts.tf       　 コスト通知・Budgets
+│   ├── notify_ip.tf         　 IP 通知
 │   ├── variables.tf / outputs.tf / versions.tf / backend.hcl
 │   ├── functions/
 │   │   ├── _shared/notifier.py    共有: Webhook 送信ユーティリティ
@@ -282,7 +283,7 @@ generic_game_server/
 | `versions.tf` | Terraform のバージョン制約・AWS プロバイダー・S3 backend の設定。 |
 | `variables.tf` | `discord_public_key`（Discord の公開鍵）・`aws_region`・`discord_allowed_user_ids` などの入力変数定義。 |
 | `network.tf` | **全ゲームで共有する VPC** を作成する。2つのパブリックサブネット・インターネットゲートウェイ・ルートテーブル・S3 VPC Endpoint（NAT なしで S3 に届かせるため）を含む。 |
-| `main.tf` | Discord ボットの本体を構築する。API Gateway v2（HTTPS エンドポイント）と Lambda（`discord_control`）を接続し、必要な IAM 権限を付与する。 |
+| `main.tf` | Discord ボットの本体を構築する。API Gateway v2（HTTPS エンドポイント）と Lambda（`module "discord_control_lambda"` として `../modules/lambda_function` 経由で定義）を接続し、必要な IAM 権限を付与する。 |
 | `ecr.tf` | モニターサイドカー用の Docker イメージを保管する ECR リポジトリを作成する（オプション。使うと起動時の `dnf install` を省略でき速くなる）。 |
 | `state.tf` | Terraform の状態ファイル（`terraform.tfstate`）を保存する S3 バケットを作成する。バージョニング・暗号化・削除防止（`prevent_destroy`）付き。 |
 | `outputs.tf` | `apply` 後に表示する値。`interactions_endpoint_url`（Discord Developer Portal に登録する URL）や VPC ID・サブネット ID など。 |
@@ -292,7 +293,7 @@ generic_game_server/
 
 | ファイル | 役割 |
 |---------|------|
-| `index.py` | **Lambda ハンドラ本体**。6 つのスラッシュコマンド（`/games` `/start` `/stop` `/status` `/cost` `/update`）の処理ロジックを持つ。AWS API（ECS/SSM/Cost Explorer）を直接呼び出す。Discord の「3 秒制限」に対応するため、自分自身を非同期 invoke する **deferred worker 方式**を実装している。 |
+| `index.py` | **Lambda ハンドラ本体**。9 つのスラッシュコマンド（`/games` `/start` `/stop` `/status` `/cost` `/update` `/backup` `/restore` `/switch-slot`）の処理ロジックを持つ。AWS API（ECS/SSM/Cost Explorer）を直接呼び出す。Discord の「3 秒制限」に対応するため、自分自身を非同期 invoke する **deferred worker 方式**を実装している。 |
 | `ed25519.py` | **Discord からのリクエストが本物かを確認する署名検証モジュール**。Ed25519 という暗号方式を外部ライブラリなしに純 Python で実装。Lambda に依存パッケージを追加せずに済む。 |
 | `provider.py` | **Discord 固有の処理を切り離した抽象化レイヤー**。「署名の確認」「リクエストの解析」「レスポンスの整形」「Webhook への送信」を担う。`MESSAGING_PROVIDER=slack` にすると Slack にも切り替えられる設計。 |
 
@@ -300,13 +301,13 @@ generic_game_server/
 
 | ファイル | 役割 |
 |---------|------|
-| `scripts/register_commands.sh` | Discord にスラッシュコマンドを登録する初回セットアップ用スクリプト。`DISCORD_APP_ID`・`DISCORD_BOT_TOKEN` を環境変数でわたし、Discord API v10 に PUT して 6 コマンドを一括登録する。 |
+| `scripts/register_commands.sh` | Discord にスラッシュコマンドを登録する初回セットアップ用スクリプト。`DISCORD_APP_ID`・`DISCORD_BOT_TOKEN` を環境変数でわたし、Discord API v10 に PUT して 9 コマンドを一括登録する。 |
 
 ---
 
 ### 3-2. game-stack/（ゲーム1本分のリソース）
 
-#### Terraform ファイル（11 個）
+#### Terraform ファイル（12 個）
 
 | ファイル | 役割 | 主要 AWS リソース |
 |---------|------|-----------------|
@@ -316,10 +317,11 @@ generic_game_server/
 | `iam.tf` | ECS タスクが AWS API を呼べるように IAM ロールと権限を定義する。「タスク実行ロール」（コンテナ起動用）と「タスクロール」（タスク内から AWS API を呼ぶ用）の2種類。 | `aws_iam_role.task_execution`, `aws_iam_role.task` |
 | `storage.tf` | ゲームのセーブデータを保存する **EFS**（ネットワークストレージ）を作成する。暗号化・自動 IA/Archive 階層化・誤削除防止（`prevent_destroy`）付き。 | `aws_efs_file_system.main`, `aws_efs_mount_target.main`, `aws_efs_access_point.main` |
 | `ecs.tf` | ECS の主要リソース（クラスター・タスク定義・サービス）を定義する。**2 コンテナ構成**（ゲーム本体 + モニターサイドカー）と EFS マウントを設定する。 | `aws_ecs_cluster.game`, `aws_ecs_task_definition.game`, `aws_ecs_service.game` |
-| `backup.tf` | EFS セーブデータを S3 にバックアップする仕組みを作る。24 時間ごとに EventBridge が Lambda を起動して差分同期する。 | `aws_s3_bucket.backup`, `aws_lambda_function.backup_efs`, `aws_cloudwatch_event_rule.backup_schedule` |
-| `auto_update.tf` | Discord `/update` コマンドから呼ばれる**アップデート Lambda** を定義する。通常サービスを止めずに専用タスクでゲームを更新する。 | `aws_lambda_function.auto_update`, `aws_iam_role.auto_update` |
-| `cost_guard.tf` | **コストガード Lambda**（ハード停止の安全網）を定義する。1 時間ごとに起動し、実行時間が上限を超えたタスクを強制停止する。 | `aws_lambda_function.cost_guard`, `aws_cloudwatch_event_rule.cost_guard` |
-| `notifications.tf` | 2 種類の通知をまとめて定義する。① IP 通知（EventBridge → Lambda → Discord）、② コスト通知（AWS Budgets → SNS → Lambda → Discord）。失敗時の SQS デッドレターキュー（DLQ）も含む。 | `aws_lambda_function.notify_ip`, `aws_lambda_function.notify_cost`, `aws_budgets_budget.monthly`, `aws_sns_topic.cost_alert`, `aws_sqs_queue.notify_cost_dlq` |
+| `backup.tf` | EFS セーブデータを S3 にバックアップする仕組みを作る。24 時間ごとに EventBridge が Lambda を起動して差分同期する。 | `aws_s3_bucket.backup`, `module.backup_efs_lambda`, `module.backup_schedule_trigger` |
+| `auto_update.tf` | Discord `/update` コマンドから呼ばれる**アップデート Lambda** を定義する。通常サービスを止めずに専用タスクでゲームを更新する。 | `module.auto_update_lambda` |
+| `cost_guard.tf` | **コストガード Lambda**（ハード停止の安全網）を定義する。1 時間ごとに起動し、実行時間が上限を超えたタスクを強制停止する。 | `module.cost_guard_lambda`, `module.cost_guard_trigger` |
+| `notify_ip.tf` | サーバー起動時の IP 通知（+停止通知）を定義する（EventBridge → Lambda → Discord）。 | `module.notify_ip_lambda`, `module.server_ready_trigger`, `module.ecs_stopped_trigger` |
+| `cost_alerts.tf` | コスト超過アラートを定義する（AWS Budgets → SNS → Lambda → Discord）。失敗時の SQS DLQ も含む。 | `module.notify_cost_lambda`, `aws_budgets_budget.monthly`, `aws_sns_topic.cost_alert`, `aws_sqs_queue.notify_cost_dlq` |
 | `outputs.tf` | `apply` 後に表示する値。ECS クラスター名・EFS ID・バックアップバケット名・よく使う AWS CLI コマンドのサンプルなど。 | - |
 
 #### Python ファイル（functions/）

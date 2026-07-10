@@ -30,124 +30,80 @@ echo "App ID: ${DISCORD_APP_ID}"
 echo "============================================="
 
 # コマンド定義（9つ: /games /start /stop /status /cost /update /backup /restore /switch-slot）
-COMMANDS=$(cat << 'EOF'
-[
-  {
-    "name": "games",
-    "description": "ゲームサーバーの一覧と稼働状態を表示します",
-    "type": 1
-  },
-  {
-    "name": "start",
-    "description": "ゲームサーバーを起動します",
-    "type": 1,
-    "options": [
-      {
+# game オプション（type=3, required, autocomplete）は6コマンドで完全に同一の形なので、
+# python3 で生成する（説明文だけが違う定型ブロックを手で9回コピペしない）。
+COMMANDS=$(python3 << 'PYEOF'
+import json
+
+
+def game_option(description):
+    """全コマンド共通の game オプション（説明文のみ差し替え）"""
+    return {
         "name": "game",
-        "description": "起動するゲーム名",
+        "description": description,
         "type": 3,
-        "required": true,
-        "autocomplete": true
-      }
-    ]
-  },
-  {
-    "name": "stop",
-    "description": "ゲームサーバーを停止します",
-    "type": 1,
-    "options": [
-      {
-        "name": "game",
-        "description": "停止するゲーム名",
-        "type": 3,
-        "required": true,
-        "autocomplete": true
-      }
-    ]
-  },
-  {
-    "name": "status",
-    "description": "ゲームサーバーの稼働状態と IP アドレスを表示します",
-    "type": 1,
-    "options": [
-      {
-        "name": "game",
-        "description": "確認するゲーム名",
-        "type": 3,
-        "required": true,
-        "autocomplete": true
-      }
-    ]
-  },
-  {
-    "name": "cost",
-    "description": "今月の AWS コスト・予算残・月末着地予測を表示します",
-    "type": 1
-  },
-  {
-    "name": "update",
-    "description": "サーバーを停止したままサーバー本体をアップデートします（UPDATE_ON_BOOT）",
-    "type": 1,
-    "options": [
-      {
-        "name": "game",
-        "description": "アップデートするゲーム名",
-        "type": 3,
-        "required": true,
-        "autocomplete": true
-      }
-    ]
-  },
-  {
-    "name": "backup",
-    "description": "今すぐセーブデータを EFS から S3 へバックアップします",
-    "type": 1,
-    "options": [
-      {
-        "name": "game",
-        "description": "バックアップするゲーム名",
-        "type": 3,
-        "required": true,
-        "autocomplete": true
-      }
-    ]
-  },
-  {
-    "name": "restore",
-    "description": "S3 の最新バックアップをセーブデータへ復元します（要停止）",
-    "type": 1,
-    "options": [
-      {
-        "name": "game",
-        "description": "復元するゲーム名",
-        "type": 3,
-        "required": true,
-        "autocomplete": true
-      }
-    ]
-  },
-  {
-    "name": "switch-slot",
-    "description": "セーブデータのスロットを S3 経由で切り替えます（要停止）",
-    "type": 1,
-    "options": [
-      {
-        "name": "game",
-        "description": "対象のゲーム名",
-        "type": 3,
-        "required": true,
-        "autocomplete": true
-      },
-      {
-        "name": "slot",
-        "description": "切り替え先のスロット名（英数字・ハイフン・アンダースコア）",
-        "type": 3,
-        "required": true
-      }
-    ]
-  }
+        "required": True,
+        "autocomplete": True,
+    }
+
+
+commands = [
+    {"name": "games", "description": "ゲームサーバーの一覧と稼働状態を表示します", "type": 1},
+    {
+        "name": "start",
+        "description": "ゲームサーバーを起動します",
+        "type": 1,
+        "options": [game_option("起動するゲーム名")],
+    },
+    {
+        "name": "stop",
+        "description": "ゲームサーバーを停止します",
+        "type": 1,
+        "options": [game_option("停止するゲーム名")],
+    },
+    {
+        "name": "status",
+        "description": "ゲームサーバーの稼働状態と IP アドレスを表示します",
+        "type": 1,
+        "options": [game_option("確認するゲーム名")],
+    },
+    {"name": "cost", "description": "今月の AWS コスト・予算残・月末着地予測を表示します", "type": 1},
+    {
+        "name": "update",
+        "description": "サーバーを停止したままサーバー本体をアップデートします（UPDATE_ON_BOOT）",
+        "type": 1,
+        "options": [game_option("アップデートするゲーム名")],
+    },
+    {
+        "name": "backup",
+        "description": "今すぐセーブデータを EFS から S3 へバックアップします",
+        "type": 1,
+        "options": [game_option("バックアップするゲーム名")],
+    },
+    {
+        "name": "restore",
+        "description": "S3 の最新バックアップをセーブデータへ復元します（要停止）",
+        "type": 1,
+        "options": [game_option("復元するゲーム名")],
+    },
+    {
+        "name": "switch-slot",
+        "description": "セーブデータのスロットを S3 経由で切り替えます（要停止）",
+        "type": 1,
+        "options": [
+            game_option("対象のゲーム名"),
+            {
+                "name": "slot",
+                "description": "切り替え先のスロット名（英数字・ハイフン・アンダースコア）",
+                "type": 3,
+                "required": True,
+            },
+        ],
+    },
 ]
-EOF
+
+print(json.dumps(commands, ensure_ascii=False))
+PYEOF
 )
 
 # Discord API にコマンドを一括登録（PUT = 全置換）

@@ -6,7 +6,8 @@
 
 # EFS ファイルシステム
 resource "aws_efs_file_system" "main" {
-  encrypted = true # 保存データを暗号化
+  encrypted       = true      # 保存データを暗号化
+  throughput_mode = "elastic" # regional の Archive 移行（lifecycle_policy）が Elastic 必須のため
 
   # One Zone 選択時: 指定 AZ の単一ストレージに配置（約 45% 安）
   # !! 作成後の変更不可 !! 変更時は prevent_destroy を外して destroy → apply → S3 復元が必要
@@ -16,8 +17,12 @@ resource "aws_efs_file_system" "main" {
   # 30 日間アクセスのないファイルを EFS-IA（低頻度アクセス）ストレージに移行（約 90% 安い）。
   # 次回 ECS タスク起動時に読み出されると自動で標準ストレージへ戻る（AFTER_1_ACCESS）ため
   # 稼働中のゲームプレイへの影響はない。データが小さい（数MB）場合はコスト差も小さい。
+  # AWS API 上、transition_to_ia と transition_to_primary_storage_class は
+  # 同一 lifecycle_policy ブロックに混在させると "malformed" エラーになるため分離する。
   lifecycle_policy {
-    transition_to_ia                    = "AFTER_30_DAYS"
+    transition_to_ia = "AFTER_30_DAYS"
+  }
+  lifecycle_policy {
     transition_to_primary_storage_class = "AFTER_1_ACCESS"
   }
 
@@ -40,7 +45,6 @@ resource "aws_efs_file_system" "main" {
 
   tags = {
     Name = "${local.name_prefix}-efs"
-    Game = var.game_name
   }
 }
 

@@ -9,7 +9,7 @@ MAX_RUNTIME_HOURS を超えて RUNNING なタスクを検出した場合:
   2. stop_task で強制停止（孤児更新タスクも含む）
   3. Discord/Slack に通知
 
-通常プレイ中には発火しないよう MAX_RUNTIME_HOURS のデフォルトは 12 時間。
+通常プレイ中には発火しないよう MAX_RUNTIME_HOURS のデフォルトは 24 時間。
 このバックストップはアイドル自動停止の代替ではなく最終安全網。
 """
 
@@ -17,23 +17,19 @@ import logging
 import os
 from datetime import datetime, timezone
 
-import boto3
-
-from notifier import send_message
+from aws_clients import client as _aws_client
+from notifier import send_message_safe
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-# 他の Lambda と同様に region_name を明示してクライアントを初期化する
-# （環境変数 AWS_REGION は Lambda ランタイムが自動注入する）
-AWS_REGION = os.environ.get("AWS_REGION", "ap-northeast-1")
-ecs = boto3.client("ecs", region_name=AWS_REGION)
+ecs = _aws_client("ecs")
 
 
 def lambda_handler(event, context):
     cluster_arn = os.environ["CLUSTER_ARN"]
     service_name = os.environ["SERVICE_NAME"]
-    max_runtime_hours = float(os.environ.get("MAX_RUNTIME_HOURS", "12"))
+    max_runtime_hours = float(os.environ.get("MAX_RUNTIME_HOURS", "24"))
     game_name = os.environ.get("GAME_NAME", service_name)
 
     try:
@@ -115,8 +111,8 @@ def _check_and_stop(cluster_arn, service_name, max_runtime_hours, game_name):
             )
             stopped.append(task_arn)
             logger.info("Stopped task: %s", task_arn)
-        except Exception as exc:
-            logger.error("Failed to stop task %s: %s", task_arn, exc)
+        except Exception:
+            logger.exception("Failed to stop task %s", task_arn)
 
     # サービスタスクを停止した場合は desiredCount=0 にして再起動を防ぐ
     # （監視サイドカーの do_shutdown と同等の最終手段）
@@ -128,8 +124,8 @@ def _check_and_stop(cluster_arn, service_name, max_runtime_hours, game_name):
                 desiredCount=0,
             )
             logger.info("Set service %s desiredCount=0 to prevent restart.", service_name)
-        except Exception as exc:
-            logger.error("Failed to set desiredCount=0 for service %s: %s", service_name, exc)
+        except Exception:
+            logger.exception("Failed to set desiredCount=0 for service %s", service_name)
 
     # Discord/Slack 通知
     if stopped:
@@ -142,9 +138,6 @@ def _check_and_stop(cluster_arn, service_name, max_runtime_hours, game_name):
             f"監視サイドカーが正常に動作しているか CloudWatch Logs で確認してください。\n"
             f"```"
         )
-        try:
-            send_message(content)
-        except Exception as exc:
-            logger.error("Failed to send notification: %s", exc)
+        send_message_safe(content)
 
     return stopped
