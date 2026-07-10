@@ -38,6 +38,8 @@ resource "aws_ecs_cluster" "game" {
     # AutoUpdateFunction タグ: /update コマンドが Worker Lambda 名を取得するために使用する
     # discord_control Lambda が cluster タグ経由でこの関数を非同期 invoke する
     AutoUpdateFunction = "${local.name_prefix}-auto-update"
+    # BackupFunction タグ: /backup, /restore コマンドが Worker Lambda 名を取得するために使用する
+    BackupFunction = "${local.name_prefix}-backup-efs"
   }
 }
 
@@ -154,7 +156,7 @@ resource "aws_ecs_task_definition" "game" {
         { name = "READY_POLL_INTERVAL", value = "5" }, # フェーズA: ポート待ち受け検知の粒度（秒）
         # 停止前バックアップ用（auto_shutdown.sh が参照する）
         { name = "BACKUP_BUCKET", value = aws_s3_bucket.backup.id },
-        { name = "BACKUP_PREFIX", value = local.name_prefix },
+        { name = "BACKUP_PREFIX", value = local.backup_prefix },
         { name = "EFS_MOUNT_PATH", value = var.efs_mount_path },
         # SSM ステータス連携（Discord 通知・/status コマンド用）
         { name = "READY_PARAM", value = "/ggs/${local.name_prefix}/ready" },

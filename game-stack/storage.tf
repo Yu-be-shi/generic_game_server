@@ -68,7 +68,7 @@ resource "aws_efs_access_point" "main" {
 
   # EFS 内にゲーム専用ディレクトリを作成（存在しない場合は自動生成）
   root_directory {
-    path = "/${var.game_name}"
+    path = local.save_dir
     creation_info {
       owner_uid   = 1000
       owner_gid   = 1000

@@ -143,6 +143,14 @@ resource "aws_iam_role_policy" "discord_control" {
         Resource = "arn:aws:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:function:*-auto-update"
       },
       {
+        # /backup, /restore コマンド: game-stack の backup_efs Worker Lambda を非同期 invoke する
+        # ゲーム追加時の再デプロイを避けるためワイルドカード（*-backup-efs）で全ゲームを対象にする
+        Sid      = "InvokeBackupEfs"
+        Effect   = "Allow"
+        Action   = ["lambda:InvokeFunction"]
+        Resource = "arn:aws:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:function:*-backup-efs"
+      },
+      {
         # deferred response: 自分自身を非同期 invoke してコマンドをワーカー実行する。
         # 関数名は local.function_name で固定し、ワイルドカードを使わない。
         # 循環依存を避けるため aws_lambda_function リソース参照ではなく ARN を直接構成する。

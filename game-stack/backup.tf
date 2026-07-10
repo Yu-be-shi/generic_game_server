@@ -200,6 +200,13 @@ resource "aws_iam_role_policy" "backup_lambda" {
           aws_s3_bucket.backup.arn,
           "${aws_s3_bucket.backup.arn}/*"
         ]
+      },
+      {
+        # switch_slot 用: 現在アクティブなスロット名を記録する SSM パラメータ 1 個のみに限定
+        Sid      = "ActiveSlotParam"
+        Effect   = "Allow"
+        Action   = ["ssm:GetParameter", "ssm:PutParameter"]
+        Resource = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/ggs/${local.name_prefix}/active_slot"
       }
     ]
   })
@@ -255,8 +262,9 @@ resource "aws_lambda_function" "backup_efs" {
 
   environment {
     variables = {
-      BACKUP_BUCKET = aws_s3_bucket.backup.id
-      BACKUP_PREFIX = local.name_prefix
+      BACKUP_BUCKET     = aws_s3_bucket.backup.id
+      BACKUP_PREFIX     = local.backup_prefix
+      ACTIVE_SLOT_PARAM = "/ggs/${local.name_prefix}/active_slot"
     }
   }
 

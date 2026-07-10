@@ -10,6 +10,10 @@ Function URL 経由で Discord から POST される。
     /stop  game:<name>  → ゲームサーバーを停止
     /status game:<name> → 稼働状態と現在の IP アドレス
     /cost               → 今月の AWS コスト・予算残・月末予測
+    /update game:<name> → サーバー本体を停止したままアップデート
+    /backup game:<name> → 今すぐ EFS→S3 のバックアップを実行
+    /restore game:<name> → S3→EFS へ最新バックアップをミラーリング（要停止）
+    /switch-slot game:<name> slot:<name> → セーブデータのスロットを切り替え（要停止）
 
 ゲームの発見方法:
     ECS クラスターの「Game」タグで対象クラスターを特定する。
@@ -203,6 +207,17 @@ def _dispatch_command(command: str, options: dict) -> str:
         return _cmd_cost()
     elif command == "update":
         return _cmd_update(game_name) if game_name else "ゲーム名を指定してください。"
+    elif command == "backup":
+        return _cmd_backup(game_name) if game_name else "ゲーム名を指定してください。"
+    elif command == "restore":
+        return _cmd_restore(game_name) if game_name else "ゲーム名を指定してください。"
+    elif command == "switch-slot":
+        slot = options.get("slot", "").strip()
+        if not game_name:
+            return "ゲーム名を指定してください。"
+        if not slot:
+            return "スロット名を指定してください。"
+        return _cmd_switch_slot(game_name, slot)
     else:
         return f"不明なコマンド: `/{command}`"
 
@@ -536,6 +551,162 @@ def _cmd_update(game_name: str) -> str:
         f"🔄 **{game_name}** のアップデートを開始しました。\n"
         "SteamCMD でサーバーを更新中です。完了したら通知します（数分かかります）。\n"
         "アップデート中は `/start` できません。"
+    )
+
+
+def _cmd_backup(game_name: str) -> str:
+    """
+    /backup game:<name>: 今すぐ EFS → S3 のバックアップを実行する。
+
+    通常は「サーバー停止直前」と「毎日1回の定期実行」で自動的に行われるが、
+    それを待たずに任意のタイミングで手動実行したい場合に使う。
+    ファイルを読むだけの処理のため、サーバー起動中でも実行可能（定期バックアップと同じ扱い）。
+    """
+    cluster_arn, service_arn = _find_service(game_name)
+    if not cluster_arn:
+        return (
+            f"❌ ゲーム `{game_name}` が見つかりません。\n"
+            "`/games` で利用可能なゲームを確認してください。"
+        )
+
+    backup_function = _get_cluster_tag(cluster_arn, "BackupFunction")
+    if not backup_function:
+        return (
+            f"❌ **{game_name}** の BackupFunction タグが見つかりません。\n"
+            "`game-stack` の `terraform apply` を実行してください。"
+        )
+
+    try:
+        lambda_client.invoke(
+            FunctionName=backup_function,
+            InvocationType="Event",  # 非同期: StatusCode=202 → すぐに返る
+            Payload=json.dumps({"action": "backup"}).encode("utf-8"),
+        )
+        logger.info("backup_efs(backup) を非同期 invoke: function=%s game=%s", backup_function, game_name)
+    except Exception:
+        logger.exception("Backup Lambda の invoke に失敗: %s", backup_function)
+        return (
+            f"❌ **{game_name}** のバックアップ実行に失敗しました。\n"
+            "IAM 権限または Lambda 設定を確認してください。"
+        )
+
+    return (
+        f"💾 **{game_name}** のバックアップ（EFS→S3）を開始しました。\n"
+        "完了通知は届きません（数秒〜数十秒で完了します）。結果を確認したい場合は "
+        f"CloudWatch Logs `/aws/lambda/{backup_function}` を参照してください。"
+    )
+
+
+def _cmd_restore(game_name: str) -> str:
+    """
+    /restore game:<name>: S3 上の最新バックアップを EFS へミラーリングする（S3→EFS）。
+
+    危険な操作のため:
+      - サーバー起動中は拒否する（ゲームプロセスが EFS を使用中の書き込み競合を防ぐ）
+      - 実行前に現在の EFS 内容を丸ごと S3 の _pre_restore_snapshot/ へ退避してから上書きする
+      - S3 に存在しないファイルの削除は行わない（追加・上書きのみの安全側動作）
+    """
+    cluster_arn, service_arn = _find_service(game_name)
+    if not cluster_arn:
+        return (
+            f"❌ ゲーム `{game_name}` が見つかりません。\n"
+            "`/games` で利用可能なゲームを確認してください。"
+        )
+
+    # サービス起動中は拒否（ゲームプロセスが EFS を使用中）
+    svc = _describe_service(cluster_arn, service_arn)
+    if svc and svc.get("desiredCount", 0) > 0:
+        return (
+            f"⚠️ **{game_name}** は現在起動中です。\n"
+            f"`/stop game:{game_name}` で停止してから実行してください。"
+        )
+
+    backup_function = _get_cluster_tag(cluster_arn, "BackupFunction")
+    if not backup_function:
+        return (
+            f"❌ **{game_name}** の BackupFunction タグが見つかりません。\n"
+            "`game-stack` の `terraform apply` を実行してください。"
+        )
+
+    try:
+        lambda_client.invoke(
+            FunctionName=backup_function,
+            InvocationType="Event",  # 非同期: StatusCode=202 → すぐに返る
+            Payload=json.dumps({"action": "restore_all"}).encode("utf-8"),
+        )
+        logger.info("backup_efs(restore_all) を非同期 invoke: function=%s game=%s", backup_function, game_name)
+    except Exception:
+        logger.exception("Restore Lambda の invoke に失敗: %s", backup_function)
+        return (
+            f"❌ **{game_name}** の復元実行に失敗しました。\n"
+            "IAM 権限または Lambda 設定を確認してください。"
+        )
+
+    return (
+        f"♻️ **{game_name}** の復元（S3→EFS）を開始しました。\n"
+        "実行前の内容は自動的に S3 の `_pre_restore_snapshot/` へ退避済みです。\n"
+        "完了通知は届きません。結果を確認したい場合は "
+        f"CloudWatch Logs `/aws/lambda/{backup_function}` を参照してください。"
+    )
+
+
+def _cmd_switch_slot(game_name: str, slot: str) -> str:
+    """
+    /switch-slot game:<name> slot:<name>: セーブデータのスロットを S3 経由で切り替える。
+
+    /restore（EFS 全体を対象にした汎用ミラーリング）とは異なり、Palworld のワールド
+    フォルダ（SaveGames/0/<GUID>/）だけを対象にする軽量な切り替え。EFS アクセスポイント・
+    ECS タスク定義は一切変更しないため terraform apply は不要（Discord だけで完結する）。
+
+    危険な操作のため:
+      - サーバー起動中は拒否する（ゲームプロセスがセーブデータを使用中の書き込み競合を防ぐ）
+      - 切り替え前に現在のスロットの内容を自動的に S3 の slots/<現スロット>/ へ保存する
+      - 切り替え先スロットが未使用の場合は空のワールドとして起動する（新規ワールド扱い）
+    """
+    cluster_arn, service_arn = _find_service(game_name)
+    if not cluster_arn:
+        return (
+            f"❌ ゲーム `{game_name}` が見つかりません。\n"
+            "`/games` で利用可能なゲームを確認してください。"
+        )
+
+    # サービス起動中は拒否（ゲームプロセスがセーブデータを使用中）
+    svc = _describe_service(cluster_arn, service_arn)
+    if svc and svc.get("desiredCount", 0) > 0:
+        return (
+            f"⚠️ **{game_name}** は現在起動中です。\n"
+            f"`/stop game:{game_name}` で停止してから実行してください。"
+        )
+
+    backup_function = _get_cluster_tag(cluster_arn, "BackupFunction")
+    if not backup_function:
+        return (
+            f"❌ **{game_name}** の BackupFunction タグが見つかりません。\n"
+            "`game-stack` の `terraform apply` を実行してください。"
+        )
+
+    try:
+        lambda_client.invoke(
+            FunctionName=backup_function,
+            InvocationType="Event",  # 非同期: StatusCode=202 → すぐに返る
+            Payload=json.dumps({"action": "switch_slot", "slot": slot}).encode("utf-8"),
+        )
+        logger.info(
+            "backup_efs(switch_slot) を非同期 invoke: function=%s game=%s slot=%s",
+            backup_function, game_name, slot,
+        )
+    except Exception:
+        logger.exception("Switch slot Lambda の invoke に失敗: %s", backup_function)
+        return (
+            f"❌ **{game_name}** のスロット切り替えに失敗しました。\n"
+            "IAM 権限または Lambda 設定を確認してください。"
+        )
+
+    return (
+        f"🔀 **{game_name}** のセーブデータを `{slot}` へ切り替え中です。\n"
+        "切り替え前の内容は自動的に S3 の `slots/` 配下へ保存されています。\n"
+        "完了通知は届きません。結果を確認したい場合は "
+        f"CloudWatch Logs `/aws/lambda/{backup_function}` を参照してください。"
     )
 
 

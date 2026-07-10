@@ -95,6 +95,17 @@ variable "efs_mount_path" {
   }
 }
 
+variable "save_slot" {
+  description = "セーブデータの識別子。切り替えると同じ game_name のまま EFS 上の別ディレクトリ・S3 上の別プレフィックスを使う。省略時（空文字列）は従来どおり game_name 直下を使う（後方互換）。"
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.save_slot == "" || can(regex("^[a-zA-Z0-9_-]+$", var.save_slot))
+    error_message = "save_slot は英数字・ハイフン・アンダースコアのみ使用できます。"
+  }
+}
+
 variable "environment_variables" {
   description = "ゲームコンテナに渡す環境変数。例: { SERVER_NAME = \"MyServer\", PLAYERS = \"16\" }"
   type        = map(string)

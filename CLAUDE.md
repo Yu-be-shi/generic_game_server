@@ -24,7 +24,7 @@
 
 ### `control-plane/` — AWS アカウントに 1 度だけデプロイ
 
-Discord ボットと**全ゲームで共有する VPC** をホスト。単一の Lambda がすべてのスラッシュコマンド（`/games`、`/start`、`/stop`、`/status`、`/cost`、`/update`）を処理し、ECS/SSM/Cost Explorer API を直接呼び出す。
+Discord ボットと**全ゲームで共有する VPC** をホスト。単一の Lambda がすべてのスラッシュコマンド（`/games`、`/start`、`/stop`、`/status`、`/cost`、`/update`、`/backup`、`/restore`、`/switch-slot`）を処理し、ECS/SSM/Cost Explorer API を直接呼び出す。
 
 ```
 Discord POST → API Gateway v2 HTTP API → Lambda (index.py)
@@ -74,6 +74,7 @@ EventBridge ルール:
 | `Game` | ゲーム名（例：`palworld`）| `/games`、`/start`、`/stop`、`/status` のオートコンプリート |
 | `StatusParamPrefix` | `/ggs/<name_prefix>` | `/status` がこのプレフィックスから SSM パラメータを読む |
 | `AutoUpdateFunction` | `<name_prefix>-auto-update` | `/update` がこの名前で Lambda を呼び出す |
+| `BackupFunction` | `<name_prefix>-backup-efs` | `/backup`、`/restore` がこの名前で Lambda を呼び出す |
 
 ## SSM パラメータ名前空間
 
@@ -183,6 +184,47 @@ aws logs tail /aws/lambda/palworld-palworld-auto-update --follow --region ap-nor
 # SSM ステータスパラメータを読む
 aws ssm get-parameters-by-path --path /ggs/palworld-palworld --region ap-northeast-1
 ```
+
+## セーブデータの切り替え（`save_slot`）
+
+同じ `game_name`（= 同じ ECS クラスター/Lambda/Discord上のゲーム名）のまま、複数のセーブデータを切り替えて使いたい場合は `save_slot` 変数を使う。同時に複数のセーブデータを起動することはできない（1 サービスにつき 1 セーブデータ）。
+
+```bash
+# 1. サーバーを完全停止（起動中に切り替えると不整合の恐れがあるため必ず停止する）
+#    Discord /stop、または: aws ecs update-service --desired-count 0 ...
+
+# 2. tfvars に save_slot を追加（未設定/空文字列 = 従来どおり game_name 直下のセーブデータ）
+#    例: games/palworld.tfvars に save_slot = "world2" を追記
+
+# 3. apply（EFS アクセスポイントが新しいパス用に再作成され、タスク定義も新リビジョンになる。
+#    ECS サービスは lifecycle { ignore_changes = [task_definition] } のためすぐには切り替わらない）
+terraform apply -var-file=../games/palworld.tfvars
+
+# 4. Discord /start で起動（起動時に最新の ACTIVE タスク定義リビジョンを解決するため、
+#    新しいセーブデータのマウントで起動する）
+```
+
+`save_slot` は EFS 上のセーブデータ保存先（`/${game_name}/${save_slot}`）と S3 バックアップの保存先プレフィックスのみを切り替える。ECS クラスター名・Lambda 名・SSM 名前空間・Discord 上のゲーム名は変化しないため、コントロールプレーン側の変更は不要。元のセーブデータは EFS 上の別ディレクトリにそのまま残るので、`save_slot` を戻せば復元できる。
+
+## セーブデータの手動バックアップ・復元（`/backup`、`/restore`）
+
+`game-stack/functions/backup_efs/backup_efs.py` の Lambda（`<name_prefix>-backup-efs`）を Discord から直接呼び出せる。通常の自動バックアップ（停止直前・毎日1回）を待たずに、任意のタイミングで EFS⇔S3 間のコピーを行いたい場合に使う。
+
+- **`/backup game:<name>`** — 今すぐ EFS→S3 のバックアップを実行（`action=backup`）。ファイルを読むだけなのでサーバー起動中でも実行可。
+- **`/restore game:<name>`** — S3→EFS へ丸ごとミラーリング（`action=restore_all`）。破壊的操作のため **サーバー起動中は拒否**される。実行前に現在の EFS 内容を自動的に S3 の `_pre_restore_snapshot/<exec_id>/` へ退避してから上書きする。S3 に存在しないファイルの削除は行わない（追加・上書きのみの安全側動作）。
+
+どちらも `InvocationType="Event"`（非同期）で呼び出すため、Discord には「開始しました」とだけ返り、完了通知は届かない（結果は CloudWatch Logs `/aws/lambda/<name_prefix>-backup-efs` を参照）。コストは Lambda 実行時間分のみで、無料枠内に収まる想定（実行数秒〜数十秒）。
+
+## Discord だけでのセーブデータ切り替え（`/switch-slot`）
+
+上記の `save_slot` 変数（tfvars 編集 + `terraform apply` が必要）とは別に、**Terraform を一切触らずに Discord だけでセーブデータを切り替える**軽量な方法として `/switch-slot game:<name> slot:<name>` を用意している。
+
+- 対象は Palworld のワールドフォルダ（`Pal/Saved/SaveGames/0/<GUID>/`）のみ。EFS 全体（ゲーム本体のインストールデータ含む）は対象にしない。EFS アクセスポイントや ECS タスク定義も変更しないため、apply は不要。
+- 処理内容: ①現在アクティブなスロット名を SSM（`/ggs/<name_prefix>/active_slot`）から取得 → ②今のワールドフォルダの中身を S3 の `<backup_prefix>/slots/<現スロット>/` へ保存（保護）→ ③フォルダの中身を削除（フォルダ名・GUID は残すため、サーバー設定の書き換えは不要）→ ④S3 の `slots/<切替先スロット>/` にデータがあれば書き戻す（無ければ空のまま＝次回起動時に新規ワールド）→ ⑤SSM の `active_slot` を更新。
+- 権限は既存の `backup_efs` Lambda が持つ EFS 読み書き・S3 読み書きのみで足りる。追加したのは SSM パラメータ1個（`active_slot`）への `GetParameter`/`PutParameter` のみで、ECS タスク定義の登録や `iam:PassRole` のような強い権限は付与していない。
+- `/restore` と同様、**サーバー起動中は拒否**される（`/stop` してから実行する）。
+
+`save_slot`（Terraform）との違い: `save_slot` はどのゲームタイプにも使える汎用的な仕組みで完全なディレクトリ分離ができるが apply が必要。`/switch-slot` はPalworld専用だが Discord だけで完結する。切り替え頻度が高いなら `/switch-slot`、EFSごと完全に分離したい・他ゲームタイプで使いたいなら `save_slot` を使う。
 
 ## 新しいゲームの追加
 

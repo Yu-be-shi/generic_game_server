@@ -58,6 +58,11 @@ locals {
   cluster_name = "${local.name_prefix}-cluster"
   service_name = "${local.name_prefix}-service"
 
+  # save_slot によるセーブデータ切り替え（B方式）:
+  # save_slot が空なら従来どおり game_name 直下、指定時のみサブディレクトリを切る（既存デプロイ非破壊）
+  save_dir      = var.save_slot == "" ? "/${var.game_name}" : "/${var.game_name}/${var.save_slot}"
+  backup_prefix = var.save_slot == "" ? local.name_prefix : "${local.name_prefix}/${var.save_slot}"
+
   # EFS・ECS・バックアップ Lambda の配置先サブネット
   # regional（既定）: 全パブリックサブネット（複数 AZ）
   # one_zone: sort した先頭サブネット 1 つに固定（EFS マウントターゲットと同一 AZ が必須）

@@ -29,7 +29,7 @@ echo "Discord スラッシュコマンド登録"
 echo "App ID: ${DISCORD_APP_ID}"
 echo "============================================="
 
-# コマンド定義（6つ: /games /start /stop /status /cost /update）
+# コマンド定義（9つ: /games /start /stop /status /cost /update /backup /restore /switch-slot）
 COMMANDS=$(cat << 'EOF'
 [
   {
@@ -95,6 +95,54 @@ COMMANDS=$(cat << 'EOF'
         "type": 3,
         "required": true,
         "autocomplete": true
+      }
+    ]
+  },
+  {
+    "name": "backup",
+    "description": "今すぐセーブデータを EFS から S3 へバックアップします",
+    "type": 1,
+    "options": [
+      {
+        "name": "game",
+        "description": "バックアップするゲーム名",
+        "type": 3,
+        "required": true,
+        "autocomplete": true
+      }
+    ]
+  },
+  {
+    "name": "restore",
+    "description": "S3 の最新バックアップをセーブデータへ復元します（要停止）",
+    "type": 1,
+    "options": [
+      {
+        "name": "game",
+        "description": "復元するゲーム名",
+        "type": 3,
+        "required": true,
+        "autocomplete": true
+      }
+    ]
+  },
+  {
+    "name": "switch-slot",
+    "description": "セーブデータのスロットを S3 経由で切り替えます（要停止）",
+    "type": 1,
+    "options": [
+      {
+        "name": "game",
+        "description": "対象のゲーム名",
+        "type": 3,
+        "required": true,
+        "autocomplete": true
+      },
+      {
+        "name": "slot",
+        "description": "切り替え先のスロット名（英数字・ハイフン・アンダースコア）",
+        "type": 3,
+        "required": true
       }
     ]
   }

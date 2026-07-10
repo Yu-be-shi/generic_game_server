@@ -7,7 +7,7 @@ backup_efs.py - EFS セーブデータの S3 バックアップ／リストア L
     1. EFS マウントパス（/mnt/efs）以下を再帰的に走査
     2. S3 上の同名オブジェクトとサイズを比較し、変化があるファイルのみアップロード
 
-【リストアモード】
+【リストアモード（zip 指定・Palworld ワールド形式）】
   トリガー: aws lambda invoke による手動実行
   処理:
     1. S3 上の zip ファイルを /tmp へダウンロード
@@ -23,6 +23,29 @@ backup_efs.py - EFS セーブデータの S3 バックアップ／リストア L
       "source_world": "1D01670C455B39AD23DC8B8B6F1969CB"
     }
 
+【全体ミラーリストアモード（restore_all・任意データ対応）】
+  トリガー: aws lambda invoke による手動実行（Discord /restore コマンドから非同期 invoke）
+  処理:
+    1. 現在の EFS マウント配下を丸ごと S3 の _pre_restore_snapshot/<exec_id>/ へ退避
+    2. S3 上の BACKUP_PREFIX 配下（_pre_restore_snapshot を除く）を EFS へダウンロード
+       ※ 追加・上書きのみ行い、EFS 側にしかないファイルは削除しない（安全側）
+  イベント例:
+    { "action": "restore_all" }
+
+【スロット切り替えモード（switch_slot・Palworld セーブデータ専用）】
+  トリガー: aws lambda invoke による手動実行（Discord /switch-slot コマンドから非同期 invoke）
+  処理:
+    1. SSM（ACTIVE_SLOT_PARAM）から現在のスロット名を取得（未設定なら "default"）
+    2. 現在のワールドフォルダ（SaveGames/0/<GUID>/）の中身を S3 の
+       <BACKUP_PREFIX>/slots/<現スロット>/ へ保存（保護）
+    3. ワールドフォルダの中身を削除（フォルダ自体・GUID 名は残す）
+    4. S3 の <BACKUP_PREFIX>/slots/<切替先スロット>/ にデータがあれば EFS へ書き戻す
+       （無ければ空のまま → 次回起動時に新規ワールドとして生成される）
+    5. ACTIVE_SLOT_PARAM を切替先スロット名に更新
+  EFS アクセスポイントや ECS タスク定義は一切変更しないため、terraform apply は不要。
+  イベント例:
+    { "action": "switch_slot", "slot": "world2" }
+
 依存ライブラリ: boto3（Lambda ランタイムに標準搭載）、標準ライブラリのみ
 前提:
   - Lambda は VPC 内に配置し、EFS アクセスポイント経由でマウント済み（/mnt/efs）
@@ -32,6 +55,7 @@ backup_efs.py - EFS セーブデータの S3 バックアップ／リストア L
 import logging
 import os
 import pathlib
+import re
 import shutil
 import zipfile
 
@@ -44,6 +68,8 @@ logger.setLevel(logging.INFO)
 # 環境変数（Terraform から注入）
 BACKUP_BUCKET = os.environ["BACKUP_BUCKET"]
 BACKUP_PREFIX = os.environ["BACKUP_PREFIX"]
+# switch_slot 専用。空文字列の場合はスロット切り替え機能を使わない前提（既存デプロイ後方互換）
+ACTIVE_SLOT_PARAM = os.environ.get("ACTIVE_SLOT_PARAM", "")
 
 # EFS マウントパス（file_system_config.local_mount_path と一致させる）
 EFS_MOUNT_PATH = pathlib.Path("/mnt/efs")
@@ -55,7 +81,13 @@ SAVEGAMES_REL = pathlib.Path("Pal/Saved/SaveGames/0")
 # LocalData.sav は単機ローカル専用のため除外
 SKIP_FILES = {"LocalData.sav"}
 
+# switch_slot 未実施の場合のデフォルトスロット名（既存セーブデータの呼び名）
+DEFAULT_SLOT = "default"
+
+SLOT_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
+
 s3 = boto3.client("s3")
+ssm = boto3.client("ssm")
 
 
 # ============================================================
@@ -68,6 +100,10 @@ def lambda_handler(event, context):
 
     if action == "restore":
         return restore_handler(event, context)
+    elif action == "restore_all":
+        return restore_all_handler(event, context)
+    elif action == "switch_slot":
+        return switch_slot_handler(event, context)
     else:
         return backup_handler()
 
@@ -341,3 +377,210 @@ def _extract_world(
             stats["extracted"] += 1
 
     return stats
+
+
+# ============================================================
+# 全体ミラーリストアモード（任意データ対応）
+# ============================================================
+
+def restore_all_handler(event, context):
+    """
+    S3 の BACKUP_PREFIX 配下を丸ごと EFS へミラーリングする汎用リストアハンドラ。
+
+    restore_handler（zip指定・Palworldワールド形式専用）と異なり、ファイル形式を
+    解釈せず BACKUP_PREFIX 配下の全オブジェクトをそのまま EFS へコピーする。
+
+    安全側の設計:
+      - 実行前に現在の EFS 内容を丸ごと S3 の _pre_restore_snapshot/<exec_id>/ へ退避する
+        （ロールバックしたい場合はこのプレフィックスから手動で戻す）
+      - 追加・上書きのみ行い、EFS 側にしかない（S3側にはもう存在しない）ファイルは削除しない
+      - _pre_restore_snapshot/ 配下自体はダウンロード対象から除外する（無限に肥大化するため）
+    """
+    exec_id = context.aws_request_id
+    snapshot_prefix = f"{BACKUP_PREFIX}/_pre_restore_snapshot/{exec_id}"
+
+    stats = {"snapshotted": 0, "downloaded": 0, "failed": 0}
+
+    # 1. 現状の EFS を退避（ロールバック用）
+    if EFS_MOUNT_PATH.exists():
+        for f in EFS_MOUNT_PATH.rglob("*"):
+            if not f.is_file():
+                continue
+            rel = f.relative_to(EFS_MOUNT_PATH)
+            key = f"{snapshot_prefix}/{rel}"
+            try:
+                s3.upload_file(str(f), BACKUP_BUCKET, key)
+                stats["snapshotted"] += 1
+            except Exception:
+                logger.exception("スナップショット失敗: %s", f)
+
+    logger.info(
+        "restore_all スナップショット完了: %d ファイル -> s3://%s/%s/",
+        stats["snapshotted"], BACKUP_BUCKET, snapshot_prefix,
+    )
+
+    # 2. S3 → EFS ミラーリング（_pre_restore_snapshot 配下は除外）
+    exclude_prefix = f"{BACKUP_PREFIX}/_pre_restore_snapshot/"
+    paginator = s3.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=BACKUP_BUCKET, Prefix=f"{BACKUP_PREFIX}/"):
+        for obj in page.get("Contents", []):
+            key = obj["Key"]
+            if key.startswith(exclude_prefix):
+                continue
+
+            relative = key[len(BACKUP_PREFIX) + 1:]
+            if not relative:
+                continue
+
+            dest_path = EFS_MOUNT_PATH / relative
+
+            # パストラバーサル対策（S3キーは信頼できる想定だが念のため検証する）
+            try:
+                dest_path.resolve().relative_to(EFS_MOUNT_PATH.resolve())
+            except ValueError:
+                logger.warning("不正なキーをスキップ: %s", key)
+                stats["failed"] += 1
+                continue
+
+            try:
+                dest_path.parent.mkdir(parents=True, exist_ok=True)
+                s3.download_file(BACKUP_BUCKET, key, str(dest_path))
+                stats["downloaded"] += 1
+            except Exception:
+                logger.exception("ダウンロード失敗: %s", key)
+                stats["failed"] += 1
+
+    logger.info(
+        "restore_all 完了: snapshotted=%d downloaded=%d failed=%d",
+        stats["snapshotted"], stats["downloaded"], stats["failed"],
+    )
+    return {"action": "restore_all", "snapshot_prefix": snapshot_prefix, **stats}
+
+
+# ============================================================
+# スロット切り替えモード（Palworld セーブデータ専用）
+# ============================================================
+
+def switch_slot_handler(event, context):
+    """
+    S3 上の名前付きスロット間で Palworld のセーブデータを切り替える。
+
+    restore_all_handler と異なり EFS マウント全体（ゲーム本体含む）は対象にせず、
+    ワールドフォルダ（SaveGames/0/<GUID>/）の中身のみを操作する。
+    EFS アクセスポイント・ECS タスク定義は一切変更しないため terraform apply は不要。
+
+    処理:
+      1. 現在アクティブなスロット名を SSM から取得（未設定なら DEFAULT_SLOT）
+      2. 現在のワールドフォルダの中身を S3 の <BACKUP_PREFIX>/slots/<現スロット>/ へ保存（保護）
+      3. ワールドフォルダの中身を削除（フォルダ自体・GUID 名は残す。
+         サーバーはフォルダ名でワールドを参照するため、名前を変えないことで
+         GameUserSettings.ini の編集が不要になる ―― restore_handler と同じ設計）
+      4. S3 の <BACKUP_PREFIX>/slots/<切替先スロット>/ にデータがあれば EFS へ書き戻す
+         （無ければ空のまま → 次回起動時に新規ワールドとして生成される）
+      5. SSM の ACTIVE_SLOT_PARAM を切替先スロット名に更新
+    """
+    new_slot = event.get("slot")
+    if not new_slot:
+        raise ValueError(
+            "switch_slot アクションには 'slot' フィールドが必要です。"
+            "例: {\"action\": \"switch_slot\", \"slot\": \"world2\"}"
+        )
+    if not SLOT_NAME_RE.match(new_slot):
+        raise ValueError("slot は英数字・ハイフン・アンダースコアのみ使用できます。")
+
+    current_slot = _get_active_slot()
+    savegames_root = EFS_MOUNT_PATH / SAVEGAMES_REL
+    stats = {"protected": 0, "restored": 0, "failed": 0}
+
+    world_dir = _find_existing_world(savegames_root)
+
+    if world_dir is None:
+        # ワールドフォルダがまだ存在しない（初回起動前の EFS）場合は
+        # 切替先スロット名でフォルダを新規作成する（保護対象なし）
+        savegames_root.mkdir(parents=True, exist_ok=True)
+        world_dir = savegames_root / new_slot
+        world_dir.mkdir(exist_ok=True)
+        logger.info("既存ワールドなし。新規フォルダを作成: %s", world_dir)
+    else:
+        # 1. 現在のスロットを保護（S3 へアップロード）
+        protect_prefix = f"{BACKUP_PREFIX}/slots/{current_slot}"
+        for f in world_dir.rglob("*"):
+            if not f.is_file():
+                continue
+            rel = f.relative_to(world_dir)
+            key = f"{protect_prefix}/{rel}"
+            try:
+                s3.upload_file(str(f), BACKUP_BUCKET, key)
+                stats["protected"] += 1
+            except Exception:
+                logger.exception("スロット保護失敗: %s", f)
+
+        logger.info(
+            "スロット保護完了: %s -> s3://%s/%s/ (%d ファイル)",
+            current_slot, BACKUP_BUCKET, protect_prefix, stats["protected"],
+        )
+
+        # 2. ワールドフォルダの中身を削除（フォルダ自体は残す）
+        _clear_directory(world_dir)
+        logger.info("ワールドフォルダをクリア完了: %s", world_dir)
+
+    # 3. 切替先スロットのデータを復元（S3 に存在する場合のみ）
+    restore_prefix = f"{BACKUP_PREFIX}/slots/{new_slot}/"
+    paginator = s3.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=BACKUP_BUCKET, Prefix=restore_prefix):
+        for obj in page.get("Contents", []):
+            key = obj["Key"]
+            relative = key[len(restore_prefix):]
+            if not relative:
+                continue
+
+            dest_path = world_dir / relative
+
+            # パストラバーサル対策（S3キーは信頼できる想定だが念のため検証する）
+            try:
+                dest_path.resolve().relative_to(world_dir.resolve())
+            except ValueError:
+                logger.warning("不正なキーをスキップ: %s", key)
+                stats["failed"] += 1
+                continue
+
+            try:
+                dest_path.parent.mkdir(parents=True, exist_ok=True)
+                s3.download_file(BACKUP_BUCKET, key, str(dest_path))
+                stats["restored"] += 1
+            except Exception:
+                logger.exception("復元失敗: %s", key)
+                stats["failed"] += 1
+
+    # 4. アクティブスロットを更新
+    _set_active_slot(new_slot)
+
+    logger.info(
+        "switch_slot 完了: %s -> %s (protected=%d, restored=%d, failed=%d)",
+        current_slot, new_slot, stats["protected"], stats["restored"], stats["failed"],
+    )
+    return {
+        "action": "switch_slot",
+        "from_slot": current_slot,
+        "to_slot": new_slot,
+        **stats,
+    }
+
+
+def _get_active_slot() -> str:
+    """SSM から現在アクティブなスロット名を取得する。未設定・未構成時は DEFAULT_SLOT を返す。"""
+    if not ACTIVE_SLOT_PARAM:
+        return DEFAULT_SLOT
+    try:
+        return ssm.get_parameter(Name=ACTIVE_SLOT_PARAM)["Parameter"]["Value"]
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "ParameterNotFound":
+            return DEFAULT_SLOT
+        raise
+
+
+def _set_active_slot(slot: str):
+    """SSM のアクティブスロットパラメータを更新する。ACTIVE_SLOT_PARAM 未設定時は何もしない。"""
+    if not ACTIVE_SLOT_PARAM:
+        return
+    ssm.put_parameter(Name=ACTIVE_SLOT_PARAM, Value=slot, Type="String", Overwrite=True)
