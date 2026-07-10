@@ -76,10 +76,11 @@ API Gateway v2（AWS）
 Lambda: discord_control
   ├─ ed25519.py   → 署名を検証（偽リクエスト拒否）
   ├─ provider.py  → Discord の形式を解析
-  └─ index.py     → コマンドを処理して応答
+  ├─ index.py     → deferred ワーカー起動・ルーティング
+  └─ commands/    → コマンドを処理して応答
 ```
 
-関係ファイル: `control-plane/functions/discord_control/index.py`, `ed25519.py`, `provider.py`
+関係ファイル: `control-plane/functions/discord_control/index.py`, `ed25519.py`, `provider.py`, `commands/`
 
 > **Discord の制約**: Discord は「3 秒以内に応答せよ」というルールがあります。ECS の操作は 3 秒を超えることがあるため、Lambda は「まず仮応答を返し、処理を別の Lambda 呼び出しに委ねる」 **deferred（遅延）方式**を使っています。
 
@@ -90,7 +91,7 @@ Lambda: discord_control
 `/start` コマンドが来ると、ECS サービスの「起動台数」を 0 → 1 に変えます。
 
 ```
-index.py (_cmd_start)
+commands/start.py (cmd_start)
   ↓ ECS UpdateService (desired-count=1)
 ECS サービス
   ↓ タスクを起動
@@ -191,7 +192,7 @@ Lambda: notify_ip
 `/update palworld` コマンドで、ゲームサーバーを停止せずに新バージョンに更新できます。
 
 ```
-index.py (_cmd_update)
+commands/update.py (cmd_update)
   ↓ auto_update Lambda を非同期 invoke
 auto_update.py
   ↓ 通常サービスとは別の「ワンオフタスク」を run_task で起動
@@ -218,9 +219,12 @@ generic_game_server/
 │   ├── variables.tf / outputs.tf / versions.tf / backend.hcl
 │   └── functions/
 │       └── discord_control/
-│           ├── index.py     　 コマンド処理本体
+│           ├── index.py     　 Lambda ハンドラ・deferred ワーカー起動
+│           ├── clients.py   　 boto3 クライアントの共有インスタンス
+│           ├── ecs_helpers.py 　 ECS/SSM 検索・状態取得の共通ロジック
 │           ├── ed25519.py   　 署名検証（純 Python 実装）
-│           └── provider.py  　 Discord 形式を抽象化
+│           ├── provider.py  　 Discord 形式を抽象化
+│           └── commands/    　 コマンドごとの処理本体（games.py, start.py, ...）
 │
 ├── game-stack/              ← ② ゲーム1本分（workspace ごとに独立）
 │   ├── ecs.tf               　 ECS クラスター・タスク定義・サービス
@@ -293,9 +297,12 @@ generic_game_server/
 
 | ファイル | 役割 |
 |---------|------|
-| `index.py` | **Lambda ハンドラ本体**。9 つのスラッシュコマンド（`/games` `/start` `/stop` `/status` `/cost` `/update` `/backup` `/restore` `/switch-slot`）の処理ロジックを持つ。AWS API（ECS/SSM/Cost Explorer）を直接呼び出す。Discord の「3 秒制限」に対応するため、自分自身を非同期 invoke する **deferred worker 方式**を実装している。 |
+| `index.py` | **Lambda ハンドラ本体**。署名検証・deferred ワーカーの起動と実行を担う。Discord の「3 秒制限」に対応するため、自分自身を非同期 invoke する **deferred worker 方式**を実装している。コマンドごとの処理ロジックは `commands/` パッケージに委譲する。 |
+| `clients.py` | ECS/EC2/SSM/Cost Explorer/Budgets/STS/Lambda の boto3 クライアントを一度だけ生成し、`index.py`・`ecs_helpers.py`・`commands/` 配下から共有する。 |
+| `ecs_helpers.py` | ECS クラスター/サービスの検索、SSM ステータス読み取りなど、複数コマンドで共通する AWS 読み取りロジックを集約。 |
 | `ed25519.py` | **Discord からのリクエストが本物かを確認する署名検証モジュール**。Ed25519 という暗号方式を外部ライブラリなしに純 Python で実装。Lambda に依存パッケージを追加せずに済む。 |
 | `provider.py` | **Discord 固有の処理を切り離した抽象化レイヤー**。「署名の確認」「リクエストの解析」「レスポンスの整形」「Webhook への送信」を担う。`MESSAGING_PROVIDER=slack` にすると Slack にも切り替えられる設計。 |
+| `commands/` | 9 つのスラッシュコマンド（`/games` `/start` `/stop` `/status` `/cost` `/update` `/backup` `/restore` `/switch-slot`）をコマンド単位のファイルに分割した実装。`guards.py` に `/update` `/backup` `/restore` `/switch-slot` 共通のガード処理（起動中チェック・メンテナンス中チェック・Worker Lambda 非同期 invoke）を集約し、`__init__.py` がコマンド名からのルーティングとオートコンプリートを担う。 |
 
 #### シェルスクリプト
 
@@ -451,10 +458,10 @@ Fargate タスク内の auto_shutdown.sh → check_status() で $MONITOR_METHOD 
 
 ### 4-4. ECS クラスタータグによるゲーム自動検出
 
-Discord ボット（`index.py`）は「どんなゲームがあるか」をハードコードしていません。代わりに **ECS クラスターのタグ**を動的に読んで判断します。
+Discord ボット（`commands/`）は「どんなゲームがあるか」をハードコードしていません。代わりに **ECS クラスターのタグ**を動的に読んで判断します。
 
 ```python
-# index.py の _list_game_names() イメージ
+# ecs_helpers.py の list_game_names() イメージ
 clusters = ecs.list_clusters()
 for cluster_arn in clusters:
     tags = ecs.list_tags_for_resource(cluster_arn)
@@ -488,7 +495,7 @@ resource "aws_ecs_service" "game" {
 
 **なぜこうするか**: `terraform apply` するたびに ECS サービスが「現在動いているタスク」を新しいリビジョンに切り替えてしまうと、サーバーが再起動してしまいます。これを避けるために Terraform にはタスク定義の変更を無視させています。
 
-**では `/start` はどうやって最新バージョンを使うのか**: `index.py` の `_get_latest_task_def_arn()` が `ecs.describe_task_definition(family)` で最新の **ACTIVE** リビジョンを実行時に解決し、`run_task` 時に明示的に指定します。
+**では `/start` はどうやって最新バージョンを使うのか**: `ecs_helpers.py` の `get_latest_task_def_arn()` が `ecs.describe_task_definition(family)` で最新の **ACTIVE** リビジョンを実行時に解決し、`run_task` 時に明示的に指定します。
 
 ---
 

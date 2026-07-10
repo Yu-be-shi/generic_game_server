@@ -331,9 +331,12 @@ generic_game_server/
 │   ├── outputs.tf                      # interactions_endpoint_url（Portal への登録値）
 │   ├── functions/
 │   │   └── discord_control/
-│   │       ├── index.py                # Discord Interactions ハンドラ（9 コマンド）
+│   │       ├── index.py                # Lambda ハンドラ・deferred ワーカー起動
+│   │       ├── clients.py              # boto3 クライアントの共有インスタンス
+│   │       ├── ecs_helpers.py          # ECS/SSM 検索・状態取得の共通ロジック
 │   │       ├── ed25519.py              # 署名検証（外部ライブラリ不要）
-│   │       └── provider.py             # Discord 固有プロトコル抽象層
+│   │       ├── provider.py             # Discord 固有プロトコル抽象層
+│   │       └── commands/               # コマンド単位の実装（9 コマンド）
 │   └── scripts/
 │       └── register_commands.sh        # スラッシュコマンド一括登録ヘルパー
 │
