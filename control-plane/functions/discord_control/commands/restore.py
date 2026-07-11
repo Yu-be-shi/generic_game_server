@@ -18,18 +18,16 @@ def cmd_restore(game_name: str) -> str:
         tag_key=TAG_BACKUP_FUNCTION,
         action_verb="実行",
         payload={"action": "restore_all"},
-        log_message=lambda worker_function: (
-            f"backup_efs(restore_all) を非同期 invoke: function={worker_function} game={game_name}"
-        ),
+        log_message=f"backup_efs(restore_all) を非同期 invoke: function={{worker_function}} game={game_name}",
         error_return=(
             f"❌ **{game_name}** の復元実行に失敗しました。\n"
             + WORKER_INVOKE_FAILURE_FOOTER
         ),
-        error_log_message=lambda worker_function: f"Restore Lambda の invoke に失敗: {worker_function}",
-        success_message=lambda worker_function: (
+        error_log_message="Restore Lambda の invoke に失敗: {worker_function}",
+        success_message=(
             f"♻️ **{game_name}** の復元（S3→EFS）を開始しました。\n"
             "実行前の内容は自動的に S3 の `_pre_restore_snapshot/` へ退避済みです。\n"
             "完了通知は届きません。"
-            + CLOUDWATCH_LOGS_REFERENCE.format(worker_function=worker_function)
+            + CLOUDWATCH_LOGS_REFERENCE
         ),
     )

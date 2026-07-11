@@ -92,10 +92,10 @@ def guarded_worker_invoke(
     game_name: str,
     tag_key: str,
     payload: dict,
-    log_message,
+    log_message: str,
     error_return: str,
-    error_log_message,
-    success_message,
+    error_log_message: str,
+    success_message: str,
     require_stopped: bool = True,
     action_verb: str = "",
 ) -> str:
@@ -109,8 +109,10 @@ def guarded_worker_invoke(
       3. tag_key のクラスタータグから Worker Lambda 名を取得（require_cluster_tag）
       4. Worker Lambda を非同期 invoke（invoke_worker_async）。
          log_message / error_log_message / success_message は worker_function が
-         判明してから組み立てる必要があるため、str ではなく
-         `worker_function -> str` の callable として受け取る。
+         判明してから初めて確定するため、`{worker_function}` プレースホルダを含む
+         テンプレート文字列として受け取り、ここで .format(worker_function=...) する。
+         呼び出し側で game_name 等を先に f-string 展開し、`{worker_function}` だけは
+         `{{worker_function}}` と二重波括弧でエスケープして残す。
     """
     cluster_arn, service_arn, err = require_service(game_name)
     if err:
@@ -134,11 +136,11 @@ def guarded_worker_invoke(
     err = invoke_worker_async(
         worker_function,
         payload,
-        log_message=log_message(worker_function),
+        log_message=log_message.format(worker_function=worker_function),
         error_return=error_return,
-        error_log_message=error_log_message(worker_function),
+        error_log_message=error_log_message.format(worker_function=worker_function),
     )
     if err:
         return err
 
-    return success_message(worker_function)
+    return success_message.format(worker_function=worker_function)

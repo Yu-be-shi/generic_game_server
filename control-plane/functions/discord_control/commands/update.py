@@ -24,15 +24,13 @@ def cmd_update(game_name: str) -> str:
         tag_key=TAG_AUTO_UPDATE_FUNCTION,
         action_verb="アップデート",
         payload={"game_name": game_name},
-        log_message=lambda worker_function: (
-            f"auto_update Worker を非同期 invoke: function={worker_function} game={game_name}"
-        ),
+        log_message=f"auto_update Worker を非同期 invoke: function={{worker_function}} game={game_name}",
         error_return=(
             f"❌ **{game_name}** のアップデート Worker の起動に失敗しました。\n"
             + WORKER_INVOKE_FAILURE_FOOTER
         ),
-        error_log_message=lambda worker_function: f"Worker Lambda の invoke に失敗: {worker_function}",
-        success_message=lambda worker_function: (
+        error_log_message="Worker Lambda の invoke に失敗: {worker_function}",
+        success_message=(
             f"🔄 **{game_name}** のアップデートを開始しました。\n"
             "SteamCMD でサーバーを更新中です。完了したら通知します（数分かかります）。\n"
             "アップデート中は `/start` できません。"

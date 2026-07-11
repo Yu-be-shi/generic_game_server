@@ -48,24 +48,51 @@ _GAME_HANDLERS = {
     "restore": cmd_restore,
 }
 
+# コマンドごとの必須オプション名（チェック順）。
+# switch-slot のみ game に加えて slot も必須なため、ここに1エントリ追加するだけで済む。
+_REQUIRED_OPTIONS = {
+    "start":       ("game",),
+    "stop":        ("game",),
+    "status":      ("game",),
+    "update":      ("game",),
+    "backup":      ("game",),
+    "restore":     ("game",),
+    "switch-slot": ("game", "slot"),
+}
+
+# オプション名 → 未指定時のエラーメッセージ
+_OPTION_REQUIRED_MESSAGE = {
+    "game": GAME_NAME_REQUIRED,
+    "slot": SLOT_NAME_REQUIRED,
+}
+
+
+def _missing_option_message(command: str, options: dict):
+    """
+    command の必須オプション（_REQUIRED_OPTIONS）が1つでも未指定なら、
+    対応するエラーメッセージを返す。すべて指定済みなら None を返す。
+    """
+    for option_name in _REQUIRED_OPTIONS.get(command, ()):
+        if not options.get(option_name, "").strip():
+            return _OPTION_REQUIRED_MESSAGE[option_name]
+    return None
+
 
 def dispatch_command(command: str, options: dict) -> str:
     """コマンド名でハンドラに振り分け、メッセージ本文（str）を返す"""
-    game_name = options.get("game", "").strip()
-
     if command in _NO_GAME_HANDLERS:
         return _NO_GAME_HANDLERS[command]()
 
+    missing_message = _missing_option_message(command, options)
+    if missing_message:
+        return missing_message
+
+    game_name = options.get("game", "").strip()
+
     if command in _GAME_HANDLERS:
-        return _GAME_HANDLERS[command](game_name) if game_name else GAME_NAME_REQUIRED
+        return _GAME_HANDLERS[command](game_name)
 
     if command == "switch-slot":
-        # slot 引数も必須のため専用ハンドリング（テーブルには乗せない）
-        slot = options.get("slot", "").strip()
-        if not game_name:
-            return GAME_NAME_REQUIRED
-        if not slot:
-            return SLOT_NAME_REQUIRED
-        return cmd_switch_slot(game_name, slot)
+        return cmd_switch_slot(game_name, options.get("slot", "").strip())
 
     return f"不明なコマンド: `/{command}`"

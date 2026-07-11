@@ -22,19 +22,19 @@ def cmd_switch_slot(game_name: str, slot: str) -> str:
         tag_key=TAG_BACKUP_FUNCTION,
         action_verb="実行",
         payload={"action": "switch_slot", "slot": slot},
-        log_message=lambda worker_function: (
+        log_message=(
             f"backup_efs(switch_slot) を非同期 invoke: "
-            f"function={worker_function} game={game_name} slot={slot}"
+            f"function={{worker_function}} game={game_name} slot={slot}"
         ),
         error_return=(
             f"❌ **{game_name}** のスロット切り替えに失敗しました。\n"
             + WORKER_INVOKE_FAILURE_FOOTER
         ),
-        error_log_message=lambda worker_function: f"Switch slot Lambda の invoke に失敗: {worker_function}",
-        success_message=lambda worker_function: (
+        error_log_message="Switch slot Lambda の invoke に失敗: {worker_function}",
+        success_message=(
             f"🔀 **{game_name}** のセーブデータを `{slot}` へ切り替え中です。\n"
             "切り替え前の内容は自動的に S3 の `slots/` 配下へ保存されています。\n"
             "完了通知は届きません。"
-            + CLOUDWATCH_LOGS_REFERENCE.format(worker_function=worker_function)
+            + CLOUDWATCH_LOGS_REFERENCE
         ),
     )
