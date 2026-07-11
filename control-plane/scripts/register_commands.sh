@@ -122,14 +122,14 @@ if [ "${HTTP_CODE}" = "200" ] || [ "${HTTP_CODE}" = "201" ]; then
   echo "✅ 登録成功（HTTP ${HTTP_CODE}）"
   echo ""
   echo "登録されたコマンド:"
-  echo "${BODY}" | python3 -c "
-import json, sys
-cmds = json.load(sys.stdin)
+  BODY="${BODY}" python3 << 'PYEOF' 2>/dev/null || echo "${BODY}"
+import json, os
+cmds = json.loads(os.environ["BODY"])
 for c in cmds:
     opts = c.get('options', [])
-    opt_str = ' '.join(f'<{o[\"name\"]}>' for o in opts) if opts else ''
-    print(f'  /{c[\"name\"]} {opt_str} - {c[\"description\"]}')
-" 2>/dev/null || echo "${BODY}"
+    opt_str = ' '.join(f'<{o["name"]}>' for o in opts) if opts else ''
+    print(f'  /{c["name"]} {opt_str} - {c["description"]}')
+PYEOF
   echo ""
   echo "グローバルコマンドは最大1時間で反映されます。"
   echo "すぐ確認したい場合は Discord を再起動してください。"

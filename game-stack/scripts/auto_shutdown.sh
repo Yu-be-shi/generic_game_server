@@ -61,17 +61,52 @@ CHECK_INTERVAL="${CHECK_INTERVAL:-60}"
 READY_POLL_INTERVAL="${READY_POLL_INTERVAL:-10}"
 STARTUP_GRACE_MINUTES="${STARTUP_GRACE_MINUTES:-30}"
 
-echo "[monitor] =========================================="
-echo "[monitor] 自動シャットダウン監視スクリプト 起動"
-echo "[monitor] クラスター  : ${CLUSTER_NAME}"
-echo "[monitor] サービス    : ${SERVICE_NAME}"
-echo "[monitor] リージョン  : ${AWS_REGION}"
-echo "[monitor] 監視ポート  : ${MONITOR_PORT}/${MONITOR_PROTOCOL}"
-echo "[monitor] アイドル上限: ${IDLE_MINUTES} 分"
-echo "[monitor] チェック間隔（アイドル監視）: ${CHECK_INTERVAL} 秒"
-echo "[monitor] ポーリング間隔（受付待ち）  : ${READY_POLL_INTERVAL} 秒"
-echo "[monitor] 起動タイムアウト            : ${STARTUP_GRACE_MINUTES} 分"
-echo "[monitor] =========================================="
+# =============================================================================
+# 共通ヘルパー
+# =============================================================================
+
+# ------------------------------------------------------------------
+# log: "[monitor] " 接頭辞付きでログ出力する（散在する echo の定型を集約）
+# ------------------------------------------------------------------
+log() {
+    echo "[monitor] $*"
+}
+
+# ------------------------------------------------------------------
+# ssm_put: SSM パラメータを String 型で上書き保存する
+# 呼び出し元でエラー時の警告メッセージ・無視方針を決める（戻り値をそのまま返す）
+# ------------------------------------------------------------------
+ssm_put() {
+    aws ssm put-parameter \
+        --name "$1" \
+        --value "$2" \
+        --type String \
+        --overwrite \
+        --region "${AWS_REGION}" \
+        --no-cli-pager > /dev/null 2>&1
+}
+
+# ------------------------------------------------------------------
+# _efs_available: EFS_MOUNT_PATH が設定済み・マウント済みかを判定する
+# write_buildid / do_shutdown の両方が同じガードを必要とする
+# （未設定のまま find/s3 sync を実行するとルート全体を対象にする危険があるため）。
+# 戻り値: 0=利用可 / 1=利用不可（呼び出し元が警告ログとスキップを行う）
+# ------------------------------------------------------------------
+_efs_available() {
+    [ -n "${EFS_MOUNT_PATH:-}" ] && [ -d "${EFS_MOUNT_PATH}" ]
+}
+
+log "=========================================="
+log "自動シャットダウン監視スクリプト 起動"
+log "クラスター  : ${CLUSTER_NAME}"
+log "サービス    : ${SERVICE_NAME}"
+log "リージョン  : ${AWS_REGION}"
+log "監視ポート  : ${MONITOR_PORT}/${MONITOR_PROTOCOL}"
+log "アイドル上限: ${IDLE_MINUTES} 分"
+log "チェック間隔（アイドル監視）: ${CHECK_INTERVAL} 秒"
+log "ポーリング間隔（受付待ち）  : ${READY_POLL_INTERVAL} 秒"
+log "起動タイムアウト            : ${STARTUP_GRACE_MINUTES} 分"
+log "=========================================="
 
 # =============================================================================
 # 依存パッケージのインストール（amazonlinux:2023 ベースイメージ）
@@ -82,27 +117,27 @@ echo "[monitor] =========================================="
 # すでに aws・ss が存在するためインストールをスキップする。
 # 素の amazonlinux:2023（既定値）の場合は従来どおり dnf でインストールする。
 if command -v aws > /dev/null 2>&1 && command -v ss > /dev/null 2>&1; then
-    echo "[monitor] 依存パッケージは事前インストール済みです。インストールをスキップします。"
+    log "依存パッケージは事前インストール済みです。インストールをスキップします。"
 else
-    echo "[monitor] 依存パッケージをインストール中（事前ビルドイメージを使うと省略できます）..."
+    log "依存パッケージをインストール中（事前ビルドイメージを使うと省略できます）..."
 
     if dnf install -y --quiet iproute python3 aws-cli 2>&1; then
-        echo "[monitor] dnf インストール完了"
+        log "dnf インストール完了"
     else
-        echo "[monitor] dnf で aws-cli のインストールに失敗。pip3 経由を試みます..."
+        log "dnf で aws-cli のインストールに失敗。pip3 経由を試みます..."
         dnf install -y --quiet iproute python3 python3-pip 2>&1
         pip3 install awscli --quiet
-        echo "[monitor] pip3 インストール完了"
+        log "pip3 インストール完了"
     fi
 
     # AWS CLI の動作確認
     if ! command -v aws > /dev/null 2>&1; then
-        echo "[monitor] エラー: AWS CLI が見つかりません。監視を中断します。"
+        log "エラー: AWS CLI が見つかりません。監視を中断します。"
         exit 1
     fi
 fi
 
-echo "[monitor] セットアップ完了。"
+log "セットアップ完了。"
 
 # =============================================================================
 # SSM ステータスパラメータの初期化（install 直後・受付待ちフェーズ開始前）
@@ -111,15 +146,9 @@ echo "[monitor] セットアップ完了。"
 # =============================================================================
 _server_ready=0
 if [ -n "${READY_PARAM:-}" ]; then
-    echo "[monitor] SSM ステータスパラメータを初期化中（ready=0）..."
-    aws ssm put-parameter \
-        --name "${READY_PARAM}" \
-        --value "0" \
-        --type String \
-        --overwrite \
-        --region "${AWS_REGION}" \
-        --no-cli-pager > /dev/null 2>&1 \
-        || echo "[monitor] 警告: SSM ready の初期化に失敗しました（権限または READY_PARAM=${READY_PARAM} を確認）"
+    log "SSM ステータスパラメータを初期化中（ready=0）..."
+    ssm_put "${READY_PARAM}" "0" \
+        || log "警告: SSM ready の初期化に失敗しました（権限または READY_PARAM=${READY_PARAM} を確認）"
 fi
 
 # =============================================================================
@@ -127,42 +156,10 @@ fi
 # =============================================================================
 
 # ------------------------------------------------------------------
-# check_status: _method に応じた readiness・プレイヤー数チェック
-# 設定する変数:
-#   _ready      0=初期化中 / 1=受付開始済み
-#   conn_count  プレイヤー数（-1=不明）
+# _query_a2s: Steam A2S_INFO クエリでプレイヤー数を取得し "ready:count" を返す
 # ------------------------------------------------------------------
-check_status() {
-    _method="${MONITOR_METHOD:-}"
-    if [ -z "${_method}" ]; then
-        if [ "${MONITOR_PROTOCOL}" = "tcp" ]; then
-            _method="tcp"
-        else
-            _method="a2s"
-        fi
-    fi
-
-    _ready=0
-    conn_count=0
-
-    case "${_method}" in
-
-        tcp)
-        # TCP 接続数監視（精度高・推奨）
-        # ※ パイプエラー隠蔽を防ぐため ss 出力を先に変数へ取得してからカウントする
-        #   (sh は pipefail 非対応のため、ss が失敗しても wc -l が 0 を返して成功に見える)
-        _ss_listen_out=$(ss -tlnH "( sport = :${MONITOR_PORT} )" 2>/dev/null || true)
-        _listen=$(printf '%s\n' "${_ss_listen_out}" | grep -c . || true)
-        if [ "${_listen:-0}" -gt 0 ] 2>/dev/null; then
-            _ready=1
-        fi
-        _ss_conn_out=$(ss -tnH state established "( sport = :${MONITOR_PORT} )" 2>/dev/null || true)
-        conn_count=$(printf '%s\n' "${_ss_conn_out}" | grep -c . || true)
-        ;;
-
-        a2s)
-        # Steam A2S_INFO クエリでプレイヤー数を取得
-        _a2s_result=$(python3 - <<'PYEOF' 2>/dev/null
+_query_a2s() {
+    python3 - <<'PYEOF' 2>/dev/null
 import os, socket, sys
 
 PORT = int(os.environ["MONITOR_PORT"])
@@ -205,18 +202,13 @@ def query_players(host, port):
 
 query_players("127.0.0.1", PORT)
 PYEOF
-) || _a2s_result="0:0"
-        if ! echo "${_a2s_result}" | grep -qE '^[01]:[0-9]+$'; then
-            _a2s_result="0:0"
-        fi
-        _ready=$(echo "${_a2s_result}" | cut -d: -f1)
-        conn_count=$(echo "${_a2s_result}" | cut -d: -f2)
-        echo "[monitor] A2S クエリ: ready=${_ready} conn_count=${conn_count}"
-        ;;
+}
 
-        rest)
-        # Palworld REST API でプレイヤー数を取得
-        _rest_result=$(python3 - <<'PYEOF' 2>/dev/null
+# ------------------------------------------------------------------
+# _query_rest: Palworld REST API でプレイヤー数を取得し "ready:count" を返す
+# ------------------------------------------------------------------
+_query_rest() {
+    python3 - <<'PYEOF' 2>/dev/null
 import os, sys, json, base64
 import urllib.request, urllib.error
 
@@ -246,17 +238,74 @@ except urllib.error.HTTPError as e:
 except Exception:
     print("0:0")
 PYEOF
-) || _rest_result="0:0"
-        if ! echo "${_rest_result}" | grep -qE '^[01]:(-1|[0-9]+)$'; then
-            _rest_result="0:0"
+}
+
+# ------------------------------------------------------------------
+# _parse_ready_count: "ready:count" 形式の結果を検証し _ready/conn_count に設定する
+# 引数: $1=クエリ結果の生文字列  $2=count 部分に許容する正規表現
+#       （tcp 系は '[0-9]+'、REST 認証エラー(-1)を許すものは '(-1|[0-9]+)'）
+# 形式が不正な場合は "0:0"（未受付・接続なし）にフォールバックする
+# ------------------------------------------------------------------
+_parse_ready_count() {
+    _raw="$1"
+    _count_pattern="$2"
+    if ! echo "${_raw}" | grep -qE "^[01]:${_count_pattern}\$"; then
+        _raw="0:0"
+    fi
+    _ready=$(echo "${_raw}" | cut -d: -f1)
+    conn_count=$(echo "${_raw}" | cut -d: -f2)
+}
+
+# ------------------------------------------------------------------
+# check_status: _method に応じた readiness・プレイヤー数チェック
+# 設定する変数:
+#   _ready      0=初期化中 / 1=受付開始済み
+#   conn_count  プレイヤー数（-1=不明）
+# ------------------------------------------------------------------
+check_status() {
+    _method="${MONITOR_METHOD:-}"
+    if [ -z "${_method}" ]; then
+        if [ "${MONITOR_PROTOCOL}" = "tcp" ]; then
+            _method="tcp"
+        else
+            _method="a2s"
         fi
-        _ready=$(echo "${_rest_result}" | cut -d: -f1)
-        conn_count=$(echo "${_rest_result}" | cut -d: -f2)
-        echo "[monitor] REST API クエリ: ready=${_ready} conn_count=${conn_count}"
+    fi
+
+    _ready=0
+    conn_count=0
+
+    case "${_method}" in
+
+        tcp)
+        # TCP 接続数監視（精度高・推奨）
+        # ※ パイプエラー隠蔽を防ぐため ss 出力を先に変数へ取得してからカウントする
+        #   (sh は pipefail 非対応のため、ss が失敗しても wc -l が 0 を返して成功に見える)
+        _ss_listen_out=$(ss -tlnH "( sport = :${MONITOR_PORT} )" 2>/dev/null || true)
+        _listen=$(printf '%s\n' "${_ss_listen_out}" | grep -c . || true)
+        if [ "${_listen:-0}" -gt 0 ] 2>/dev/null; then
+            _ready=1
+        fi
+        _ss_conn_out=$(ss -tnH state established "( sport = :${MONITOR_PORT} )" 2>/dev/null || true)
+        conn_count=$(printf '%s\n' "${_ss_conn_out}" | grep -c . || true)
+        ;;
+
+        a2s)
+        # Steam A2S_INFO クエリでプレイヤー数を取得
+        _a2s_result=$(_query_a2s) || _a2s_result="0:0"
+        _parse_ready_count "${_a2s_result}" '[0-9]+'
+        log "A2S クエリ: ready=${_ready} conn_count=${conn_count}"
+        ;;
+
+        rest)
+        # Palworld REST API でプレイヤー数を取得
+        _rest_result=$(_query_rest) || _rest_result="0:0"
+        _parse_ready_count "${_rest_result}" '(-1|[0-9]+)'
+        log "REST API クエリ: ready=${_ready} conn_count=${conn_count}"
         ;;
 
         *)
-        echo "[monitor] 警告: 未知の MONITOR_METHOD=${_method}。無人状態とみなします。"
+        log "警告: 未知の MONITOR_METHOD=${_method}。無人状態とみなします。"
         conn_count=0
         ;;
 
@@ -268,13 +317,7 @@ PYEOF
 # ------------------------------------------------------------------
 write_players() {
     if [ -n "${PLAYERS_PARAM:-}" ]; then
-        aws ssm put-parameter \
-            --name "${PLAYERS_PARAM}" \
-            --value "${conn_count:-0}" \
-            --type String \
-            --overwrite \
-            --region "${AWS_REGION}" \
-            --no-cli-pager > /dev/null 2>&1 || true
+        ssm_put "${PLAYERS_PARAM}" "${conn_count:-0}" || true
     fi
 }
 
@@ -290,8 +333,8 @@ write_buildid() {
 
     # EFS_MOUNT_PATH が未設定またはマウントされていない場合は安全のためスキップ
     # （未設定のまま find を実行すると find / でルート全探索になる危険がある）
-    if [ -z "${EFS_MOUNT_PATH:-}" ] || [ ! -d "${EFS_MOUNT_PATH}" ]; then
-        echo "[monitor] 警告: write_buildid スキップ: EFS_MOUNT_PATH が未設定またはディレクトリが存在しません (${EFS_MOUNT_PATH:-<未設定>})"
+    if ! _efs_available; then
+        log "警告: write_buildid スキップ: EFS_MOUNT_PATH が未設定またはディレクトリが存在しません (${EFS_MOUNT_PATH:-<未設定>})"
         return 0
     fi
 
@@ -300,7 +343,7 @@ write_buildid() {
         -name "appmanifest_${STEAM_APP_ID}.acf" 2>/dev/null | head -n1)
 
     if [ -z "${manifest}" ]; then
-        echo "[monitor] buildid スキップ: appmanifest_${STEAM_APP_ID}.acf が見つかりません（初回 install 前？）"
+        log "buildid スキップ: appmanifest_${STEAM_APP_ID}.acf が見つかりません（初回 install 前？）"
         return 0
     fi
 
@@ -317,44 +360,38 @@ PYEOF
 )
 
     if [ -z "${buildid}" ]; then
-        echo "[monitor] 警告: appmanifest_${STEAM_APP_ID}.acf から buildid を抽出できませんでした"
+        log "警告: appmanifest_${STEAM_APP_ID}.acf から buildid を抽出できませんでした"
         return 0
     fi
 
-    echo "[monitor] installed_buildid=${buildid} を SSM ${BUILDID_PARAM} に書き込みます"
-    aws ssm put-parameter \
-        --name "${BUILDID_PARAM}" \
-        --value "${buildid}" \
-        --type String \
-        --overwrite \
-        --region "${AWS_REGION}" \
-        --no-cli-pager > /dev/null 2>&1 \
-        || echo "[monitor] 警告: buildid の SSM 書き込みに失敗しました（IAM 権限を確認）"
+    log "installed_buildid=${buildid} を SSM ${BUILDID_PARAM} に書き込みます"
+    ssm_put "${BUILDID_PARAM}" "${buildid}" \
+        || log "警告: buildid の SSM 書き込みに失敗しました（IAM 権限を確認）"
 }
 
 # ------------------------------------------------------------------
 # do_shutdown: 停止前バックアップ → ECS desired-count=0 → exit
 # ------------------------------------------------------------------
 do_shutdown() {
-    echo "[monitor] ========================================"
-    echo "[monitor] 自動シャットダウンを実行します..."
-    echo "[monitor] aws ecs update-service --desired-count 0"
-    echo "[monitor] ========================================"
+    log "========================================"
+    log "自動シャットダウンを実行します..."
+    log "aws ecs update-service --desired-count 0"
+    log "========================================"
 
     if [ -n "${BACKUP_BUCKET:-}" ]; then
         # EFS_MOUNT_PATH が未設定またはマウントされていない場合はバックアップをスキップ
         # （未検証のまま s3 sync を実行すると aws s3 sync "/" ... でルート全体を同期する危険がある）
-        if [ -z "${EFS_MOUNT_PATH:-}" ] || [ ! -d "${EFS_MOUNT_PATH}" ]; then
-            echo "[monitor] 警告: EFS_MOUNT_PATH が未設定またはマウントされていません (${EFS_MOUNT_PATH:-<未設定>})。バックアップをスキップします。停止処理は継続します。"
+        if ! _efs_available; then
+            log "警告: EFS_MOUNT_PATH が未設定またはマウントされていません (${EFS_MOUNT_PATH:-<未設定>})。バックアップをスキップします。停止処理は継続します。"
         else
-            echo "[monitor] 停止前バックアップ開始: ${EFS_MOUNT_PATH} -> s3://${BACKUP_BUCKET}/${BACKUP_PREFIX}/"
+            log "停止前バックアップ開始: ${EFS_MOUNT_PATH} -> s3://${BACKUP_BUCKET}/${BACKUP_PREFIX}/"
             if aws s3 sync "${EFS_MOUNT_PATH}/" "s3://${BACKUP_BUCKET}/${BACKUP_PREFIX}/" \
                 --region "${AWS_REGION}" \
                 --no-progress \
                 2>&1; then
-                echo "[monitor] バックアップ完了"
+                log "バックアップ完了"
             else
-                echo "[monitor] 警告: バックアップ同期に失敗しました。停止処理は継続します。"
+                log "警告: バックアップ同期に失敗しました。停止処理は継続します。"
             fi
         fi
     fi
@@ -366,10 +403,10 @@ do_shutdown() {
         --region "${AWS_REGION}" \
         --no-cli-pager \
         > /dev/null 2>&1; then
-        echo "[monitor] ECS サービスを停止しました（desired_count=0）。"
-        echo "[monitor] ECS がタスクを停止するまでしばらくお待ちください。"
+        log "ECS サービスを停止しました（desired_count=0）。"
+        log "ECS がタスクを停止するまでしばらくお待ちください。"
     else
-        echo "[monitor] エラー: update-service の実行に失敗しました。IAM 権限を確認してください。"
+        log "エラー: update-service の実行に失敗しました。IAM 権限を確認してください。"
     fi
 
     exit 0
@@ -384,40 +421,34 @@ do_shutdown() {
 startup_grace_seconds=$((STARTUP_GRACE_MINUTES * 60))
 startup_elapsed=0
 
-echo "[monitor] フェーズA 開始（受付待ち・${READY_POLL_INTERVAL} 秒間隔・タイムアウト ${STARTUP_GRACE_MINUTES} 分）"
+log "フェーズA 開始（受付待ち・${READY_POLL_INTERVAL} 秒間隔・タイムアウト ${STARTUP_GRACE_MINUTES} 分）"
 
 while true; do
     check_status
     write_players
 
     if [ "${_ready}" = "1" ]; then
-        echo "[monitor] ゲームサーバーの受付開始を検知！（起動から約 ${startup_elapsed} 秒）"
+        log "ゲームサーバーの受付開始を検知！（起動から約 ${startup_elapsed} 秒）"
         _server_ready=1
         # Steam 系ゲームの場合: appmanifest から installed buildid を読んで SSM に保存する。
         # ready=1 より先に書くことで、Worker Lambda が stop_task する前に確実に永続化される。
         write_buildid
         if [ -n "${READY_PARAM:-}" ]; then
-            echo "[monitor] SSM へ ready=1 を書き込みます → Discord IP 通知が送信されます"
-            aws ssm put-parameter \
-                --name "${READY_PARAM}" \
-                --value "1" \
-                --type String \
-                --overwrite \
-                --region "${AWS_REGION}" \
-                --no-cli-pager > /dev/null 2>&1 \
-                || echo "[monitor] 警告: SSM ready の書き込みに失敗しました（権限を確認）"
+            log "SSM へ ready=1 を書き込みます → Discord IP 通知が送信されます"
+            ssm_put "${READY_PARAM}" "1" \
+                || log "警告: SSM ready の書き込みに失敗しました（権限を確認）"
         fi
         break
     fi
 
     startup_elapsed=$((startup_elapsed + READY_POLL_INTERVAL))
     if [ "${startup_elapsed}" -ge "${startup_grace_seconds}" ]; then
-        echo "[monitor] 起動タイムアウト（${STARTUP_GRACE_MINUTES} 分）: ゲームが受付を開始しませんでした。自動停止します。"
+        log "起動タイムアウト（${STARTUP_GRACE_MINUTES} 分）: ゲームが受付を開始しませんでした。自動停止します。"
         do_shutdown
     fi
 
     remaining_startup=$((startup_grace_seconds - startup_elapsed))
-    echo "[monitor] 受付待ち: ${startup_elapsed} 秒経過 / タイムアウトまで ${remaining_startup} 秒"
+    log "受付待ち: ${startup_elapsed} 秒経過 / タイムアウトまで ${remaining_startup} 秒"
     sleep "${READY_POLL_INTERVAL}"
 done
 
@@ -428,7 +459,7 @@ done
 idle_seconds=0
 idle_limit=$((IDLE_MINUTES * 60))
 
-echo "[monitor] フェーズB 開始（アイドル監視・${IDLE_MINUTES} 分間接続ゼロで自動停止）"
+log "フェーズB 開始（アイドル監視・${IDLE_MINUTES} 分間接続ゼロで自動停止）"
 
 while true; do
 
@@ -442,12 +473,12 @@ while true; do
 
     if [ "${conn_count}" = "-1" ]; then
         # REST API 認証エラー等 → プレイヤー数不明。カウンタ変更なし
-        echo "[monitor] 警告: プレイヤー数が不明（REST API 認証エラー？ADMIN_PASSWORD を確認）。アイドルカウンタを変更しません。"
+        log "警告: プレイヤー数が不明（REST API 認証エラー？ADMIN_PASSWORD を確認）。アイドルカウンタを変更しません。"
 
     elif [ "${conn_count}" -gt 0 ]; then
         # 接続あり → アイドルカウンタをリセット
         if [ "${idle_seconds}" -gt 0 ]; then
-            echo "[monitor] プレイヤーを検知。アイドルカウンタをリセット（接続数: ${conn_count}）"
+            log "プレイヤーを検知。アイドルカウンタをリセット（接続数: ${conn_count}）"
         fi
         idle_seconds=0
 
@@ -456,10 +487,10 @@ while true; do
         idle_seconds=$((idle_seconds + CHECK_INTERVAL))
         remaining=$((idle_limit - idle_seconds))
 
-        echo "[monitor] 無人状態: ${idle_seconds} 秒 / ${idle_limit} 秒（残り ${remaining} 秒）"
+        log "無人状態: ${idle_seconds} 秒 / ${idle_limit} 秒（残り ${remaining} 秒）"
 
         if [ "${idle_seconds}" -ge "${idle_limit}" ]; then
-            echo "[monitor] 無人タイムアウト到達。"
+            log "無人タイムアウト到達。"
             do_shutdown
         fi
     fi
