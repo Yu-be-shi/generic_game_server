@@ -4,6 +4,7 @@ import logging
 import ecs_helpers
 from clients import ecs, ssm
 from commands.guards import is_under_maintenance, require_service
+from constants import TAG_STATUS_PARAM_PREFIX
 from ssm_params import ssm_put_safe
 
 logger = logging.getLogger()
@@ -53,7 +54,7 @@ def cmd_start(game_name: str) -> str:
     # /status が「稼働中」と誤表示するため、ここで先手を打つ。
     # monitor 起動失敗時も /status が永久に「稼働中」になるのを防ぐ。
     # (notify_ip.py は value!="1" をスキップするため誤通知なし)
-    ssm_prefix = ecs_helpers.get_cluster_tag(cluster_arn, "StatusParamPrefix")
+    ssm_prefix = ecs_helpers.get_cluster_tag(cluster_arn, TAG_STATUS_PARAM_PREFIX)
     if ssm_prefix:
         if ssm_put_safe(ssm, f"{ssm_prefix}/ready", "0"):
             logger.info("/start: SSM ready を 0 にリセット: %s/ready", ssm_prefix)

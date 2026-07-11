@@ -1,5 +1,6 @@
 """backup.py - /backup game:<name>: 今すぐ EFS→S3 のバックアップを実行する"""
 from commands.guards import guarded_worker_invoke
+from constants import CLOUDWATCH_LOGS_REFERENCE, TAG_BACKUP_FUNCTION, WORKER_INVOKE_FAILURE_FOOTER
 
 
 def cmd_backup(game_name: str) -> str:
@@ -12,7 +13,7 @@ def cmd_backup(game_name: str) -> str:
     """
     return guarded_worker_invoke(
         game_name,
-        tag_key="BackupFunction",
+        tag_key=TAG_BACKUP_FUNCTION,
         require_stopped=False,
         payload={"action": "backup"},
         log_message=lambda worker_function: (
@@ -20,12 +21,12 @@ def cmd_backup(game_name: str) -> str:
         ),
         error_return=(
             f"❌ **{game_name}** のバックアップ実行に失敗しました。\n"
-            "IAM 権限または Lambda 設定を確認してください。"
+            + WORKER_INVOKE_FAILURE_FOOTER
         ),
         error_log_message=lambda worker_function: f"Backup Lambda の invoke に失敗: {worker_function}",
         success_message=lambda worker_function: (
             f"💾 **{game_name}** のバックアップ（EFS→S3）を開始しました。\n"
-            "完了通知は届きません（数秒〜数十秒で完了します）。結果を確認したい場合は "
-            f"CloudWatch Logs `/aws/lambda/{worker_function}` を参照してください。"
+            "完了通知は届きません（数秒〜数十秒で完了します）。"
+            + CLOUDWATCH_LOGS_REFERENCE.format(worker_function=worker_function)
         ),
     )

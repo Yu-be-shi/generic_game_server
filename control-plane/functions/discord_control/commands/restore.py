@@ -1,5 +1,6 @@
 """restore.py - /restore game:<name>: S3 の最新バックアップを EFS へミラーリングする"""
 from commands.guards import guarded_worker_invoke
+from constants import CLOUDWATCH_LOGS_REFERENCE, TAG_BACKUP_FUNCTION, WORKER_INVOKE_FAILURE_FOOTER
 
 
 def cmd_restore(game_name: str) -> str:
@@ -14,7 +15,7 @@ def cmd_restore(game_name: str) -> str:
     """
     return guarded_worker_invoke(
         game_name,
-        tag_key="BackupFunction",
+        tag_key=TAG_BACKUP_FUNCTION,
         action_verb="実行",
         payload={"action": "restore_all"},
         log_message=lambda worker_function: (
@@ -22,13 +23,13 @@ def cmd_restore(game_name: str) -> str:
         ),
         error_return=(
             f"❌ **{game_name}** の復元実行に失敗しました。\n"
-            "IAM 権限または Lambda 設定を確認してください。"
+            + WORKER_INVOKE_FAILURE_FOOTER
         ),
         error_log_message=lambda worker_function: f"Restore Lambda の invoke に失敗: {worker_function}",
         success_message=lambda worker_function: (
             f"♻️ **{game_name}** の復元（S3→EFS）を開始しました。\n"
             "実行前の内容は自動的に S3 の `_pre_restore_snapshot/` へ退避済みです。\n"
-            "完了通知は届きません。結果を確認したい場合は "
-            f"CloudWatch Logs `/aws/lambda/{worker_function}` を参照してください。"
+            "完了通知は届きません。"
+            + CLOUDWATCH_LOGS_REFERENCE.format(worker_function=worker_function)
         ),
     )

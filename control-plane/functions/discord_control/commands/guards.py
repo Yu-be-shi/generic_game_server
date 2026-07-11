@@ -6,6 +6,7 @@ import logging
 
 import ecs_helpers
 from clients import lambda_client, ssm
+from constants import SSM_SUFFIX_MAINTENANCE, TAG_STATUS_PARAM_PREFIX
 from ssm_params import ssm_get
 
 logger = logging.getLogger()
@@ -39,11 +40,11 @@ def reject_if_running(cluster_arn: str, service_arn: str, game_name: str, action
 
 def is_under_maintenance(cluster_arn: str) -> bool:
     """メンテナンス中（別の /update 等が実行中）かどうかを SSM から判定する。"""
-    ssm_prefix = ecs_helpers.get_cluster_tag(cluster_arn, "StatusParamPrefix")
+    ssm_prefix = ecs_helpers.get_cluster_tag(cluster_arn, TAG_STATUS_PARAM_PREFIX)
     if not ssm_prefix:
         return False
     try:
-        return ssm_get(ssm, f"{ssm_prefix}/maintenance") == "1"
+        return ssm_get(ssm, f"{ssm_prefix}{SSM_SUFFIX_MAINTENANCE}") == "1"
     except Exception:
         return False  # パラメータ未作成（初回）または取得失敗 → メンテナンス中ではないとみなす
 

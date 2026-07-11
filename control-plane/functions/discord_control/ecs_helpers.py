@@ -7,6 +7,7 @@ import logging
 from datetime import datetime, timezone
 
 from clients import ec2, ecs, ssm
+from constants import SSM_SUFFIX_NOTIFIED_TASK, SSM_SUFFIX_PLAYERS, SSM_SUFFIX_READY, TAG_GAME
 from ecs_net import get_running_task_public_ip
 from ssm_params import ssm_get, ssm_get_parameter
 
@@ -34,7 +35,7 @@ def _list_game_clusters_info() -> list:
     clusters_info = ecs.describe_clusters(clusters=cluster_arns, include=["TAGS"])["clusters"]
     result = []
     for c in clusters_info:
-        game_tag = next((t["value"] for t in c.get("tags", []) if t["key"] == "Game"), None)
+        game_tag = next((t["value"] for t in c.get("tags", []) if t["key"] == TAG_GAME), None)
         if not game_tag:
             continue
         result.append({"cluster_arn": c["clusterArn"], "game_tag": game_tag})
@@ -204,7 +205,7 @@ def get_ssm_status(prefix: str):
     ready_age_seconds = None
 
     try:
-        param = ssm_get_parameter(ssm, f"{prefix}/ready")
+        param = ssm_get_parameter(ssm, f"{prefix}{SSM_SUFFIX_READY}")
         if param is None:
             logger.debug("SSM ready パラメータ未取得（初回起動前か権限不足）: %s/ready", prefix)
         else:
@@ -218,7 +219,7 @@ def get_ssm_status(prefix: str):
 
     if ready:
         try:
-            players_value = ssm_get(ssm, f"{prefix}/players")
+            players_value = ssm_get(ssm, f"{prefix}{SSM_SUFFIX_PLAYERS}")
             players = int(players_value) if players_value is not None else None
         except ValueError:
             logger.warning("SSM players の値が整数ではありません: %s/players", prefix)
@@ -237,6 +238,6 @@ def get_notified_task(prefix: str):
     未通知（パラメータ未存在）の場合は None を返す。
     """
     try:
-        return ssm_get(ssm, f"{prefix}/notified_task")
+        return ssm_get(ssm, f"{prefix}{SSM_SUFFIX_NOTIFIED_TASK}")
     except Exception:
         return None

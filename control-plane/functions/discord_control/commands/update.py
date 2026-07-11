@@ -1,5 +1,6 @@
 """update.py - /update game:<name>: サーバー本体を停止したままアップデートする"""
 from commands.guards import guarded_worker_invoke
+from constants import TAG_AUTO_UPDATE_FUNCTION, WORKER_INVOKE_FAILURE_FOOTER
 
 
 def cmd_update(game_name: str) -> str:
@@ -20,7 +21,7 @@ def cmd_update(game_name: str) -> str:
     """
     return guarded_worker_invoke(
         game_name,
-        tag_key="AutoUpdateFunction",
+        tag_key=TAG_AUTO_UPDATE_FUNCTION,
         action_verb="アップデート",
         payload={"game_name": game_name},
         log_message=lambda worker_function: (
@@ -28,7 +29,7 @@ def cmd_update(game_name: str) -> str:
         ),
         error_return=(
             f"❌ **{game_name}** のアップデート Worker の起動に失敗しました。\n"
-            "IAM 権限または Lambda 設定を確認してください。"
+            + WORKER_INVOKE_FAILURE_FOOTER
         ),
         error_log_message=lambda worker_function: f"Worker Lambda の invoke に失敗: {worker_function}",
         success_message=lambda worker_function: (

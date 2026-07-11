@@ -3,6 +3,7 @@ import logging
 
 import ecs_helpers
 from commands.guards import require_service
+from constants import TAG_STATUS_PARAM_PREFIX
 
 logger = logging.getLogger()
 
@@ -42,7 +43,7 @@ def cmd_status(game_name: str) -> str:
 
     # SSM からゲームサーバーの実起動状態・プレイヤー数を取得
     # クラスターの StatusParamPrefix タグが SSM パラメータのプレフィックスを示す
-    ssm_prefix = ecs_helpers.get_cluster_tag(cluster_arn, "StatusParamPrefix")
+    ssm_prefix = ecs_helpers.get_cluster_tag(cluster_arn, TAG_STATUS_PARAM_PREFIX)
     if ssm_prefix:
         ready, players, ready_age = ecs_helpers.get_ssm_status(ssm_prefix)
         notified = ecs_helpers.get_notified_task(ssm_prefix)

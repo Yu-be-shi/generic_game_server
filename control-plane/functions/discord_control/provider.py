@@ -33,11 +33,28 @@ import urllib.request
 from dataclasses import dataclass, field
 
 import ed25519
+from constants import AUTOCOMPLETE_LIMIT
 
 logger = logging.getLogger()
 
 # Discord のメッセージ上限は 2000 文字
 DISCORD_MESSAGE_LIMIT = 1990
+
+# Interaction types（受信。Discord Interactions API 仕様）
+INTERACTION_TYPE_PING = 1
+INTERACTION_TYPE_APPLICATION_COMMAND = 2
+INTERACTION_TYPE_AUTOCOMPLETE = 4
+
+# Response types（送信。Discord Interactions API 仕様）
+RESPONSE_TYPE_PONG = 1
+RESPONSE_TYPE_CHANNEL_MESSAGE = 4
+RESPONSE_TYPE_DEFERRED_CHANNEL_MESSAGE = 5
+RESPONSE_TYPE_AUTOCOMPLETE_RESULT = 8
+
+EPHEMERAL_FLAG = 64          # メッセージフラグ: 実行者のみに表示
+REPLAY_WINDOW_SECONDS = 300  # 署名タイムスタンプの許容鮮度（リプレイ攻撃対策）
+DISCORD_API_BASE = "https://discord.com/api/v10"
+FOLLOWUP_TIMEOUT_SECONDS = 10
 
 
 def _truncate(text: str, limit: int) -> str:
@@ -100,7 +117,7 @@ class DiscordProvider:
         # タイムスタンプ鮮度チェック（リプレイ攻撃防止）
         try:
             ts_age = abs(time.time() - int(timestamp))
-            if ts_age > 300:  # 5 分以上古いリクエストは拒否
+            if ts_age > REPLAY_WINDOW_SECONDS:  # 5 分以上古いリクエストは拒否
                 logger.warning("タイムスタンプが古すぎます（リプレイ攻撃の可能性）: age=%.0fs", ts_age)
                 return False
         except (ValueError, TypeError):
@@ -116,7 +133,7 @@ class DiscordProvider:
         """Discord interaction body を汎用 Request に変換する"""
         interaction_type = body.get("type")
 
-        if interaction_type == 1:
+        if interaction_type == INTERACTION_TYPE_PING:
             return Request(kind="ping")
 
         data    = body.get("data", {})
@@ -130,7 +147,7 @@ class DiscordProvider:
         app_id = body.get("application_id", "")
         token  = body.get("token", "")
 
-        if interaction_type == 4:
+        if interaction_type == INTERACTION_TYPE_AUTOCOMPLETE:
             # オートコンプリート: focused==True のオプションの部分入力値を取得
             focused = ""
             for opt in data.get("options", []):
@@ -147,7 +164,7 @@ class DiscordProvider:
                 token=token,
             )
 
-        if interaction_type == 2:
+        if interaction_type == INTERACTION_TYPE_APPLICATION_COMMAND:
             return Request(
                 kind="command",
                 command=command,
@@ -161,7 +178,7 @@ class DiscordProvider:
 
     def ping_response(self) -> dict:
         """Discord PONG レスポンス（Interactions Endpoint URL 登録時の疎通確認）"""
-        return _json_response({"type": 1})
+        return _json_response({"type": RESPONSE_TYPE_PONG})
 
     def message(self, text: str, ephemeral: bool = True) -> dict:
         """
@@ -171,10 +188,10 @@ class DiscordProvider:
         """
         text = _truncate(text, DISCORD_MESSAGE_LIMIT)
         return _json_response({
-            "type": 4,
+            "type": RESPONSE_TYPE_CHANNEL_MESSAGE,
             "data": {
                 "content": text,
-                "flags": 64 if ephemeral else 0,  # 64 = EPHEMERAL
+                "flags": EPHEMERAL_FLAG if ephemeral else 0,
             },
         })
 
@@ -186,8 +203,8 @@ class DiscordProvider:
         フォローアップは send_followup() で @original を PATCH する。
         """
         return _json_response({
-            "type": 5,
-            "data": {"flags": 64 if ephemeral else 0},  # 64 = EPHEMERAL
+            "type": RESPONSE_TYPE_DEFERRED_CHANNEL_MESSAGE,
+            "data": {"flags": EPHEMERAL_FLAG if ephemeral else 0},
         })
 
     def send_followup(self, app_id: str, token: str, text: str) -> None:
@@ -197,7 +214,7 @@ class DiscordProvider:
         urllib.request を使用（外部依存ゼロ）。token の有効期限は 15 分。
         """
         text = _truncate(text, DISCORD_MESSAGE_LIMIT)
-        url  = f"https://discord.com/api/v10/webhooks/{app_id}/{token}/messages/@original"
+        url  = f"{DISCORD_API_BASE}/webhooks/{app_id}/{token}/messages/@original"
         data = json.dumps({"content": text}).encode("utf-8")
         req  = urllib.request.Request(
             url,
@@ -205,16 +222,16 @@ class DiscordProvider:
             method="PATCH",
             headers={"Content-Type": "application/json"},
         )
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with urllib.request.urlopen(req, timeout=FOLLOWUP_TIMEOUT_SECONDS) as resp:
             logger.info("フォローアップ送信成功: status=%d app_id=%s", resp.status, app_id)
 
     def autocomplete(self, choices: list) -> dict:
         """
         Discord オートコンプリート応答（APPLICATION_COMMAND_AUTOCOMPLETE_RESULT, type 8）。
-        choices は文字列リスト。Discord 上限 25 件。
+        choices は文字列リスト。Discord 上限 AUTOCOMPLETE_LIMIT 件に切り詰める。
         """
-        choice_objects = [{"name": g, "value": g} for g in choices[:25]]
-        return _json_response({"type": 8, "data": {"choices": choice_objects}})
+        choice_objects = [{"name": g, "value": g} for g in choices[:AUTOCOMPLETE_LIMIT]]
+        return _json_response({"type": RESPONSE_TYPE_AUTOCOMPLETE_RESULT, "data": {"choices": choice_objects}})
 
 
 def get_provider():
