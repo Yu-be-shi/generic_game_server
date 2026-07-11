@@ -22,24 +22,13 @@
 # Lambda ソースコード ZIP
 # ---------------------------------------------------------------
 
-data "archive_file" "cost_guard" {
-  type        = "zip"
-  output_path = "${path.module}/functions/cost_guard/cost_guard.zip"
+module "cost_guard_package" {
+  source = "../modules/lambda_package"
 
-  dynamic "source" {
-    for_each = fileset("${path.module}/functions/cost_guard", "*.py")
-    content {
-      content  = file("${path.module}/functions/cost_guard/${source.value}")
-      filename = source.value
-    }
-  }
-  dynamic "source" {
-    for_each = toset(["notifier.py", "aws_clients.py"])
-    content {
-      content  = file("${path.module}/functions/_shared/${source.value}")
-      filename = source.value
-    }
-  }
+  source_dir   = "${path.module}/functions/cost_guard"
+  shared_dir   = "${path.module}/functions/_shared"
+  shared_files = ["notifier.py", "aws_clients.py"]
+  output_path  = "${path.module}/functions/cost_guard/cost_guard.zip"
 }
 
 # ---------------------------------------------------------------
@@ -50,8 +39,8 @@ module "cost_guard_lambda" {
   source = "../modules/lambda_function"
 
   function_name    = "${local.name_prefix}-cost-guard"
-  filename         = data.archive_file.cost_guard.output_path
-  source_code_hash = data.archive_file.cost_guard.output_base64sha256
+  filename         = module.cost_guard_package.output_path
+  source_code_hash = module.cost_guard_package.output_base64sha256
   handler          = "cost_guard.lambda_handler"
   timeout          = 60
 

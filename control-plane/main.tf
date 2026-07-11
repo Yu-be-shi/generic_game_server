@@ -31,25 +31,14 @@ locals {
   shared_source_files = ["aws_clients.py", "ecs_net.py", "ssm_params.py"]
 }
 
-data "archive_file" "discord_control" {
-  type        = "zip"
-  output_path = "${path.module}/functions/discord_control.zip"
+module "discord_control_package" {
+  source = "../modules/lambda_package"
 
-  dynamic "source" {
-    for_each = fileset("${path.module}/functions/discord_control", "**/*.py")
-    content {
-      content  = file("${path.module}/functions/discord_control/${source.value}")
-      filename = source.value
-    }
-  }
-
-  dynamic "source" {
-    for_each = toset(local.shared_source_files)
-    content {
-      content  = file("${path.module}/../game-stack/functions/_shared/${source.value}")
-      filename = source.value
-    }
-  }
+  source_dir     = "${path.module}/functions/discord_control"
+  source_pattern = "**/*.py" # commands/ サブディレクトリを含む
+  shared_dir     = "${path.module}/../game-stack/functions/_shared"
+  shared_files   = local.shared_source_files
+  output_path    = "${path.module}/functions/discord_control.zip"
 }
 
 # -----------------------------------------------------------
@@ -60,8 +49,8 @@ module "discord_control_lambda" {
   source = "../modules/lambda_function"
 
   function_name    = local.function_name
-  filename         = data.archive_file.discord_control.output_path
-  source_code_hash = data.archive_file.discord_control.output_base64sha256
+  filename         = module.discord_control_package.output_path
+  source_code_hash = module.discord_control_package.output_base64sha256
   handler          = "index.lambda_handler"
 
   # Discord の3秒制限に十分な余裕を持たせる

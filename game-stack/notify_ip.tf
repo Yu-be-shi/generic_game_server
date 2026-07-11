@@ -7,33 +7,21 @@
 # コスト通知（Budgets → SNS → Lambda）は cost_alerts.tf を参照。
 # 元は notifications.tf に同居していたが、無関係な2機能のため分離した。
 
-data "archive_file" "notify_ip" {
-  type        = "zip"
-  output_path = "${path.module}/functions/notify_ip/notify_ip.zip"
+module "notify_ip_package" {
+  source = "../modules/lambda_package"
 
-  # ハンドラ本体 + 共有モジュールを同梱
-  dynamic "source" {
-    for_each = fileset("${path.module}/functions/notify_ip", "*.py")
-    content {
-      content  = file("${path.module}/functions/notify_ip/${source.value}")
-      filename = source.value
-    }
-  }
-  dynamic "source" {
-    for_each = toset(["notifier.py", "aws_clients.py", "ssm_params.py", "ecs_net.py"])
-    content {
-      content  = file("${path.module}/functions/_shared/${source.value}")
-      filename = source.value
-    }
-  }
+  source_dir   = "${path.module}/functions/notify_ip"
+  shared_dir   = "${path.module}/functions/_shared"
+  shared_files = ["notifier.py", "aws_clients.py", "ssm_params.py", "ecs_net.py"]
+  output_path  = "${path.module}/functions/notify_ip/notify_ip.zip"
 }
 
 module "notify_ip_lambda" {
   source = "../modules/lambda_function"
 
   function_name    = "${local.name_prefix}-notify-ip"
-  filename         = data.archive_file.notify_ip.output_path
-  source_code_hash = data.archive_file.notify_ip.output_base64sha256
+  filename         = module.notify_ip_package.output_path
+  source_code_hash = module.notify_ip_package.output_base64sha256
   handler          = "notify_ip.lambda_handler"
   timeout          = 30
 

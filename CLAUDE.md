@@ -91,9 +91,9 @@ EventBridge ルール:
 
 ## Lambda パッケージング
 
-Lambda ZIP ファイルは `terraform apply` のたびに Terraform の `archive_file` データソースによってビルドされる。手動のパッケージング手順は不要。game-stack の共有モジュール（`game-stack/functions/_shared/{notifier,aws_clients,ssm_params,ecs_net}.py`）は `archive_file` リソース内の個別の `source {}` ブロック（または `dynamic "source"`）として、各ゲームスタック Lambda（notify_ip、notify_cost、cost_guard、auto_update、backup_efs）に必要な分だけバンドルされる。
+Lambda ZIP ファイルは `terraform apply` のたびに `modules/lambda_package` モジュール（内部は `archive_file` データソース）によってビルドされる。手動のパッケージング手順は不要。呼び出し元が `source_dir`（ハンドラディレクトリ）と `shared_files`（`game-stack/functions/_shared/` から同梱するファイル名リスト）を指定し、各ゲームスタック Lambda（notify_ip、notify_cost、cost_guard、auto_update、backup_efs）に必要な共有モジュール（`{notifier,aws_clients,ssm_params,ecs_net}.py`）だけがバンドルされる。
 
-control-plane の discord_control Lambda も、`main.tf` の `archive_file` が `dynamic "source"` で `game-stack/functions/_shared/{aws_clients,ssm_params,ecs_net}.py` を直接参照してバンドルする（`fileset()` で discord_control 配下の全 `.py`（`commands/` 含む）も同様に列挙）。両スタックは別々の Terraform root module（別 state）のため import では共有できないが、ビルド時に同じソースファイルを zip に取り込むことでコピーを持たず単一ソース化している。`aws_clients.py`・`ssm_params.py`・`ecs_net.py` の discord_control 用コピーはもう存在しない。
+control-plane の discord_control Lambda も同じ `lambda_package` モジュールを使い、`shared_dir = "${path.module}/../game-stack/functions/_shared"` で game-stack 側の `{aws_clients,ssm_params,ecs_net}.py` を直接参照してバンドルする（`source_pattern = "**/*.py"` で discord_control 配下の全 `.py`（`commands/` 含む）も列挙）。両スタックは別々の Terraform root module（別 state）のため import では共有できないが、ビルド時に同じソースファイルを zip に取り込むことでコピーを持たず単一ソース化している。`aws_clients.py`・`ssm_params.py`・`ecs_net.py` の discord_control 用コピーはもう存在しない。
 
 ## デプロイコマンド
 

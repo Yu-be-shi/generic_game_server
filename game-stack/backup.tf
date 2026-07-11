@@ -146,27 +146,15 @@ resource "aws_security_group" "backup_lambda" {
 # バックアップ Lambda 関数（IAM ロール込み、modules/lambda_function で作成）
 # ============================================================
 
-data "archive_file" "backup_efs" {
-  type        = "zip"
-  output_path = "${path.module}/functions/backup_efs/backup_efs.zip"
+# ハンドラ本体（アクション単位・責務単位に分割された bf_*.py 群）は
+# モジュール内の fileset で自動列挙される（新しい bf_*.py 追加時も tf 側の変更は不要）
+module "backup_efs_package" {
+  source = "../modules/lambda_package"
 
-  # ハンドラ本体（アクション単位・責務単位に分割された bf_*.py 群）を
-  # fileset で自動列挙し同梱する（新しい bf_*.py 追加時も tf 側の変更は不要）
-  # + 共有 ssm_params モジュールを同梱
-  dynamic "source" {
-    for_each = fileset("${path.module}/functions/backup_efs", "*.py")
-    content {
-      content  = file("${path.module}/functions/backup_efs/${source.value}")
-      filename = source.value
-    }
-  }
-  dynamic "source" {
-    for_each = toset(["ssm_params.py"])
-    content {
-      content  = file("${path.module}/functions/_shared/${source.value}")
-      filename = source.value
-    }
-  }
+  source_dir   = "${path.module}/functions/backup_efs"
+  shared_dir   = "${path.module}/functions/_shared"
+  shared_files = ["ssm_params.py"]
+  output_path  = "${path.module}/functions/backup_efs/backup_efs.zip"
 }
 
 module "backup_efs_lambda" {
@@ -178,8 +166,8 @@ module "backup_efs_lambda" {
   # aws_iam_role.name は ForceNew のためロール再作成（実運用中インフラの破壊的変更）が
   # 発生する。既存名を明示的に維持する。
   role_name        = "${local.name_prefix}-backup-lambda"
-  filename         = data.archive_file.backup_efs.output_path
-  source_code_hash = data.archive_file.backup_efs.output_base64sha256
+  filename         = module.backup_efs_package.output_path
+  source_code_hash = module.backup_efs_package.output_base64sha256
   handler          = "backup_efs.lambda_handler"
 
   # セーブデータが大きい場合も完走できるよう最大タイムアウト（15分）に設定

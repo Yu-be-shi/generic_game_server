@@ -38,33 +38,21 @@ resource "aws_sns_topic_policy" "cost_alert" {
   })
 }
 
-data "archive_file" "notify_cost" {
-  type        = "zip"
-  output_path = "${path.module}/functions/notify_cost/notify_cost.zip"
+module "notify_cost_package" {
+  source = "../modules/lambda_package"
 
-  # ハンドラ本体 + 共有 notifier モジュールを同梱
-  dynamic "source" {
-    for_each = fileset("${path.module}/functions/notify_cost", "*.py")
-    content {
-      content  = file("${path.module}/functions/notify_cost/${source.value}")
-      filename = source.value
-    }
-  }
-  dynamic "source" {
-    for_each = toset(["notifier.py"])
-    content {
-      content  = file("${path.module}/functions/_shared/${source.value}")
-      filename = source.value
-    }
-  }
+  source_dir   = "${path.module}/functions/notify_cost"
+  shared_dir   = "${path.module}/functions/_shared"
+  shared_files = ["notifier.py"]
+  output_path  = "${path.module}/functions/notify_cost/notify_cost.zip"
 }
 
 module "notify_cost_lambda" {
   source = "../modules/lambda_function"
 
   function_name    = "${local.name_prefix}-notify-cost"
-  filename         = data.archive_file.notify_cost.output_path
-  source_code_hash = data.archive_file.notify_cost.output_base64sha256
+  filename         = module.notify_cost_package.output_path
+  source_code_hash = module.notify_cost_package.output_base64sha256
   handler          = "notify_cost.lambda_handler"
   timeout          = 10
 

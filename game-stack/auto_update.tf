@@ -14,25 +14,13 @@
 # Lambda ソースコード ZIP（handler + 共有 notifier モジュール）
 # ---------------------------------------------------------------
 
-data "archive_file" "auto_update" {
-  type        = "zip"
-  output_path = "${path.module}/functions/auto_update/auto_update.zip"
+module "auto_update_package" {
+  source = "../modules/lambda_package"
 
-  # ハンドラ本体 + 共有モジュールを同梱（notify_ip と同じパターン）
-  dynamic "source" {
-    for_each = fileset("${path.module}/functions/auto_update", "*.py")
-    content {
-      content  = file("${path.module}/functions/auto_update/${source.value}")
-      filename = source.value
-    }
-  }
-  dynamic "source" {
-    for_each = toset(["notifier.py", "aws_clients.py", "ssm_params.py"])
-    content {
-      content  = file("${path.module}/functions/_shared/${source.value}")
-      filename = source.value
-    }
-  }
+  source_dir   = "${path.module}/functions/auto_update"
+  shared_dir   = "${path.module}/functions/_shared"
+  shared_files = ["notifier.py", "aws_clients.py", "ssm_params.py"]
+  output_path  = "${path.module}/functions/auto_update/auto_update.zip"
 }
 
 # ---------------------------------------------------------------
@@ -43,8 +31,8 @@ module "auto_update_lambda" {
   source = "../modules/lambda_function"
 
   function_name    = "${local.name_prefix}-auto-update"
-  filename         = data.archive_file.auto_update.output_path
-  source_code_hash = data.archive_file.auto_update.output_base64sha256
+  filename         = module.auto_update_package.output_path
+  source_code_hash = module.auto_update_package.output_base64sha256
   handler          = "auto_update.lambda_handler"
 
   # SteamCMD アップデート + ポーリング（最大12分）+ stop_task の余裕を見て 15 分
