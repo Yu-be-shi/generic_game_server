@@ -72,7 +72,7 @@ resource "aws_iam_role_policy" "task_permissions" {
           "ecs:UpdateService",
           "ecs:DescribeServices"
         ]
-        Resource = "arn:aws:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:service/${local.cluster_name}/${local.service_name}"
+        Resource = "arn:aws:ecs:${var.aws_region}:${local.account_id}:service/${local.cluster_name}/${local.service_name}"
       },
       {
         # EFS マウント権限（authorization_config.iam = "ENABLED" の場合に必須）
@@ -105,7 +105,7 @@ resource "aws_iam_role_policy" "task_permissions" {
         Sid      = "SsmStatusPublish"
         Effect   = "Allow"
         Action   = ["ssm:PutParameter"]
-        Resource = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/ggs/${local.name_prefix}/*"
+        Resource = "arn:aws:ssm:${var.aws_region}:${local.account_id}:parameter${local.ssm_prefix}/*"
       }
     ]
   })

@@ -17,7 +17,7 @@
 
 resource "aws_s3_bucket" "backup" {
   # S3 バケット名はグローバル一意のため account_id を末尾に付与する
-  bucket = "${local.name_prefix}-backup-${data.aws_caller_identity.current.account_id}"
+  bucket = "${local.name_prefix}-backup-${local.account_id}"
 
   lifecycle {
     # terraform destroy / apply による誤削除を防止する
@@ -150,43 +150,22 @@ data "archive_file" "backup_efs" {
   type        = "zip"
   output_path = "${path.module}/functions/backup_efs/backup_efs.zip"
 
-  # ハンドラ本体（アクション単位・責務単位に分割された bf_*.py 群）
+  # ハンドラ本体（アクション単位・責務単位に分割された bf_*.py 群）を
+  # fileset で自動列挙し同梱する（新しい bf_*.py 追加時も tf 側の変更は不要）
   # + 共有 ssm_params モジュールを同梱
-  source {
-    content  = file("${path.module}/functions/backup_efs/backup_efs.py")
-    filename = "backup_efs.py"
+  dynamic "source" {
+    for_each = fileset("${path.module}/functions/backup_efs", "*.py")
+    content {
+      content  = file("${path.module}/functions/backup_efs/${source.value}")
+      filename = source.value
+    }
   }
-  source {
-    content  = file("${path.module}/functions/backup_efs/bf_config.py")
-    filename = "bf_config.py"
-  }
-  source {
-    content  = file("${path.module}/functions/backup_efs/bf_storage.py")
-    filename = "bf_storage.py"
-  }
-  source {
-    content  = file("${path.module}/functions/backup_efs/bf_palworld.py")
-    filename = "bf_palworld.py"
-  }
-  source {
-    content  = file("${path.module}/functions/backup_efs/bf_backup.py")
-    filename = "bf_backup.py"
-  }
-  source {
-    content  = file("${path.module}/functions/backup_efs/bf_restore.py")
-    filename = "bf_restore.py"
-  }
-  source {
-    content  = file("${path.module}/functions/backup_efs/bf_restore_all.py")
-    filename = "bf_restore_all.py"
-  }
-  source {
-    content  = file("${path.module}/functions/backup_efs/bf_switch_slot.py")
-    filename = "bf_switch_slot.py"
-  }
-  source {
-    content  = file("${path.module}/functions/_shared/ssm_params.py")
-    filename = "ssm_params.py"
+  dynamic "source" {
+    for_each = toset(["ssm_params.py"])
+    content {
+      content  = file("${path.module}/functions/_shared/${source.value}")
+      filename = source.value
+    }
   }
 }
 
@@ -224,7 +203,7 @@ module "backup_efs_lambda" {
   environment_variables = {
     BACKUP_BUCKET     = aws_s3_bucket.backup.id
     BACKUP_PREFIX     = local.backup_prefix
-    ACTIVE_SLOT_PARAM = "/ggs/${local.name_prefix}/active_slot"
+    ACTIVE_SLOT_PARAM = "${local.ssm_prefix}/active_slot"
   }
 
   extra_iam_statements = [
@@ -258,7 +237,7 @@ module "backup_efs_lambda" {
       Sid      = "ActiveSlotParam"
       Effect   = "Allow"
       Action   = ["ssm:GetParameter", "ssm:PutParameter"]
-      Resource = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/ggs/${local.name_prefix}/active_slot"
+      Resource = "arn:aws:ssm:${var.aws_region}:${local.account_id}:parameter${local.ssm_prefix}/active_slot"
     }
   ]
 

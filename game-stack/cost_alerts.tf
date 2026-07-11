@@ -31,7 +31,7 @@ resource "aws_sns_topic_policy" "cost_alert" {
       Resource = aws_sns_topic.cost_alert.arn
       Condition = {
         StringEquals = {
-          "aws:SourceAccount" = data.aws_caller_identity.current.account_id
+          "aws:SourceAccount" = local.account_id
         }
       }
     }]
@@ -43,13 +43,19 @@ data "archive_file" "notify_cost" {
   output_path = "${path.module}/functions/notify_cost/notify_cost.zip"
 
   # ハンドラ本体 + 共有 notifier モジュールを同梱
-  source {
-    content  = file("${path.module}/functions/notify_cost/notify_cost.py")
-    filename = "notify_cost.py"
+  dynamic "source" {
+    for_each = fileset("${path.module}/functions/notify_cost", "*.py")
+    content {
+      content  = file("${path.module}/functions/notify_cost/${source.value}")
+      filename = source.value
+    }
   }
-  source {
-    content  = file("${path.module}/functions/_shared/notifier.py")
-    filename = "notifier.py"
+  dynamic "source" {
+    for_each = toset(["notifier.py"])
+    content {
+      content  = file("${path.module}/functions/_shared/${source.value}")
+      filename = source.value
+    }
   }
 }
 
@@ -159,7 +165,7 @@ resource "aws_sns_topic_subscription" "cost_alert_to_email" {
 # ============================================================
 
 resource "aws_budgets_budget" "monthly" {
-  account_id        = data.aws_caller_identity.current.account_id
+  account_id        = local.account_id
   name              = "${local.name_prefix}-monthly-budget"
   budget_type       = "COST"
   limit_amount      = tostring(var.budget_limit_usd)

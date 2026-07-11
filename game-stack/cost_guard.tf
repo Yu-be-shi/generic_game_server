@@ -26,17 +26,19 @@ data "archive_file" "cost_guard" {
   type        = "zip"
   output_path = "${path.module}/functions/cost_guard/cost_guard.zip"
 
-  source {
-    content  = file("${path.module}/functions/cost_guard/cost_guard.py")
-    filename = "cost_guard.py"
+  dynamic "source" {
+    for_each = fileset("${path.module}/functions/cost_guard", "*.py")
+    content {
+      content  = file("${path.module}/functions/cost_guard/${source.value}")
+      filename = source.value
+    }
   }
-  source {
-    content  = file("${path.module}/functions/_shared/notifier.py")
-    filename = "notifier.py"
-  }
-  source {
-    content  = file("${path.module}/functions/_shared/aws_clients.py")
-    filename = "aws_clients.py"
+  dynamic "source" {
+    for_each = toset(["notifier.py", "aws_clients.py"])
+    content {
+      content  = file("${path.module}/functions/_shared/${source.value}")
+      filename = source.value
+    }
   }
 }
 
@@ -73,14 +75,14 @@ module "cost_guard_lambda" {
       Sid      = "EcsStopTask"
       Effect   = "Allow"
       Action   = ["ecs:StopTask"]
-      Resource = "arn:aws:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:task/${local.cluster_name}/*"
+      Resource = "arn:aws:ecs:${var.aws_region}:${local.account_id}:task/${local.cluster_name}/*"
     },
     {
       # サービスタスク停止後の desiredCount=0（再起動防止）
       Sid      = "EcsUpdateService"
       Effect   = "Allow"
       Action   = ["ecs:UpdateService"]
-      Resource = "arn:aws:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:service/${local.cluster_name}/${local.service_name}"
+      Resource = "arn:aws:ecs:${var.aws_region}:${local.account_id}:service/${local.cluster_name}/${local.service_name}"
     }
   ]
 }

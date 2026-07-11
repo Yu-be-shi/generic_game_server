@@ -12,25 +12,19 @@ data "archive_file" "notify_ip" {
   output_path = "${path.module}/functions/notify_ip/notify_ip.zip"
 
   # ハンドラ本体 + 共有モジュールを同梱
-  source {
-    content  = file("${path.module}/functions/notify_ip/notify_ip.py")
-    filename = "notify_ip.py"
+  dynamic "source" {
+    for_each = fileset("${path.module}/functions/notify_ip", "*.py")
+    content {
+      content  = file("${path.module}/functions/notify_ip/${source.value}")
+      filename = source.value
+    }
   }
-  source {
-    content  = file("${path.module}/functions/_shared/notifier.py")
-    filename = "notifier.py"
-  }
-  source {
-    content  = file("${path.module}/functions/_shared/aws_clients.py")
-    filename = "aws_clients.py"
-  }
-  source {
-    content  = file("${path.module}/functions/_shared/ssm_params.py")
-    filename = "ssm_params.py"
-  }
-  source {
-    content  = file("${path.module}/functions/_shared/ecs_net.py")
-    filename = "ecs_net.py"
+  dynamic "source" {
+    for_each = toset(["notifier.py", "aws_clients.py", "ssm_params.py", "ecs_net.py"])
+    content {
+      content  = file("${path.module}/functions/_shared/${source.value}")
+      filename = source.value
+    }
   }
 }
 
@@ -47,8 +41,8 @@ module "notify_ip_lambda" {
     # ゲームサーバー情報
     GAME_NAME      = var.game_name
     CLUSTER_ARN    = aws_ecs_cluster.game.arn
-    READY_PARAM    = "/ggs/${local.name_prefix}/ready"
-    NOTIFIED_PARAM = "/ggs/${local.name_prefix}/notified_task"
+    READY_PARAM    = "${local.ssm_prefix}/ready"
+    NOTIFIED_PARAM = "${local.ssm_prefix}/notified_task"
   })
 
   extra_iam_statements = [
@@ -74,7 +68,7 @@ module "notify_ip_lambda" {
       Sid      = "SsmStatus"
       Effect   = "Allow"
       Action   = ["ssm:GetParameter", "ssm:PutParameter"]
-      Resource = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/ggs/${local.name_prefix}/*"
+      Resource = "arn:aws:ssm:${var.aws_region}:${local.account_id}:parameter${local.ssm_prefix}/*"
     }
   ]
 }
@@ -110,7 +104,7 @@ module "server_ready_trigger" {
     source        = ["aws.ssm"]
     "detail-type" = ["Parameter Store Change"]
     detail = {
-      name      = ["/ggs/${local.name_prefix}/ready"]
+      name      = ["${local.ssm_prefix}/ready"]
       operation = ["Create", "Update"]
     }
   }

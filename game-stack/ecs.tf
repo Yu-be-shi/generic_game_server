@@ -8,7 +8,7 @@
 
 resource "aws_cloudwatch_log_group" "ecs" {
   name              = "/ecs/${local.name_prefix}"
-  retention_in_days = 7 # 7 日で自動削除してログコストを抑制
+  retention_in_days = var.log_retention_days
 
   tags = {
     Name = "${local.name_prefix}-ecs-logs"
@@ -34,8 +34,8 @@ resource "aws_ecs_cluster" "game" {
     # ここでは明示指定していないが versions.tf の provider "aws" { default_tags } が
     # 全リソースに Game = var.game_name を自動付与するため、最終的なタグは変わらない。
     # StatusParamPrefix タグ: /status コマンドが SSM パラメータを読む際のプレフィックス
-    # monitor サイドカーが "/ggs/${local.name_prefix}/ready" 等に書き込む
-    StatusParamPrefix = "/ggs/${local.name_prefix}"
+    # monitor サイドカーが "${local.ssm_prefix}/ready" 等に書き込む
+    StatusParamPrefix = local.ssm_prefix
     # AutoUpdateFunction タグ: /update コマンドが Worker Lambda 名を取得するために使用する
     # discord_control Lambda が cluster タグ経由でこの関数を非同期 invoke する
     AutoUpdateFunction = "${local.name_prefix}-auto-update"
@@ -160,12 +160,12 @@ resource "aws_ecs_task_definition" "game" {
         { name = "BACKUP_PREFIX", value = local.backup_prefix },
         { name = "EFS_MOUNT_PATH", value = var.efs_mount_path },
         # SSM ステータス連携（Discord 通知・/status コマンド用）
-        { name = "READY_PARAM", value = "/ggs/${local.name_prefix}/ready" },
-        { name = "PLAYERS_PARAM", value = "/ggs/${local.name_prefix}/players" },
+        { name = "READY_PARAM", value = "${local.ssm_prefix}/ready" },
+        { name = "PLAYERS_PARAM", value = "${local.ssm_prefix}/players" },
         # Steam バージョンチェック連携（steam_app_id 設定時のみ使用）
         # monitor が appmanifest から buildid を読んで SSM に書き込む
         { name = "STEAM_APP_ID", value = var.steam_app_id },
-        { name = "BUILDID_PARAM", value = "/ggs/${local.name_prefix}/installed_buildid" },
+        { name = "BUILDID_PARAM", value = "${local.ssm_prefix}/installed_buildid" },
       ]
 
       # セーブデータを読み取るために EFS をマウント（読み取り専用）

@@ -14,10 +14,6 @@
 # データソース
 # -----------------------------------------------------------
 
-data "aws_availability_zones" "available" {
-  state = "available"
-}
-
 # IAM ポリシーの Resource ARN 構築に使用（iam.tf / cost_alerts.tf / notify_ip.tf から参照）
 data "aws_caller_identity" "current" {}
 
@@ -57,6 +53,13 @@ locals {
   name_prefix  = "${var.game_name}-${terraform.workspace}"
   cluster_name = "${local.name_prefix}-cluster"
   service_name = "${local.name_prefix}-service"
+
+  # SSM パラメータ名前空間の共通 prefix（末尾スラッシュなし）。
+  # auto_update.tf / backup.tf / notify_ip.tf / iam.tf / ecs.tf から参照する。
+  ssm_prefix = "/ggs/${local.name_prefix}"
+
+  # IAM ポリシー・SSM/ECS ARN 構築で使う AWS アカウント ID
+  account_id = data.aws_caller_identity.current.account_id
 
   # save_slot によるセーブデータ切り替え（B方式）:
   # save_slot が空なら従来どおり game_name 直下、指定時のみサブディレクトリを切る（既存デプロイ非破壊）

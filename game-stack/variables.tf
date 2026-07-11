@@ -359,3 +359,9 @@ variable "monitor_image" {
   type        = string
   default     = "amazonlinux:2023"
 }
+
+variable "log_retention_days" {
+  description = "ECS タスクの CloudWatch Logs 保持日数（modules/lambda_function の既定値と揃えている）"
+  type        = number
+  default     = 7
+}

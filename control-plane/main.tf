@@ -15,16 +15,41 @@ data "aws_caller_identity" "current" {}
 
 locals {
   function_name = "game-server-discord-control"
+  account_id    = data.aws_caller_identity.current.account_id
 }
 
 # -----------------------------------------------------------
-# Lambda ソースコード ZIP（index.py + ed25519.py をまとめて zip 化）
+# Lambda ソースコード ZIP
 # -----------------------------------------------------------
+# discord_control/ 配下の全 .py（commands/ サブディレクトリ含む）に加え、
+# game-stack/functions/_shared/ の共有ユーティリティ3ファイルを同梱する。
+# 両スタックは別 Terraform root module（別 state）のため import で共有できず、
+# 以前はファイルをコピーして両方を手動同期していたが、dynamic "source" で
+# game-stack 側のファイルをそのまま zip に取り込むことで単一ソース化した
+# （aws_clients.py / ecs_net.py / ssm_params.py に discord_control 用のコピーは存在しない）。
+locals {
+  shared_source_files = ["aws_clients.py", "ecs_net.py", "ssm_params.py"]
+}
 
 data "archive_file" "discord_control" {
   type        = "zip"
-  source_dir  = "${path.module}/functions/discord_control"
   output_path = "${path.module}/functions/discord_control.zip"
+
+  dynamic "source" {
+    for_each = fileset("${path.module}/functions/discord_control", "**/*.py")
+    content {
+      content  = file("${path.module}/functions/discord_control/${source.value}")
+      filename = source.value
+    }
+  }
+
+  dynamic "source" {
+    for_each = toset(local.shared_source_files)
+    content {
+      content  = file("${path.module}/../game-stack/functions/_shared/${source.value}")
+      filename = source.value
+    }
+  }
 }
 
 # -----------------------------------------------------------
@@ -78,7 +103,7 @@ module "discord_control_lambda" {
       Sid      = "EcsControl"
       Effect   = "Allow"
       Action   = ["ecs:UpdateService"]
-      Resource = "arn:aws:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:service/*/*"
+      Resource = "arn:aws:ecs:${var.aws_region}:${local.account_id}:service/*/*"
     },
     {
       # タスクのパブリック IP 取得（/status）
@@ -93,7 +118,7 @@ module "discord_control_lambda" {
       Sid      = "SsmStatusRead"
       Effect   = "Allow"
       Action   = ["ssm:GetParameter"]
-      Resource = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/ggs/*"
+      Resource = "arn:aws:ssm:${var.aws_region}:${local.account_id}:parameter/ggs/*"
     },
     {
       # /start で update_service に taskDefinition を指定する際、ECS が
@@ -114,7 +139,7 @@ module "discord_control_lambda" {
       Sid      = "SsmStatusReset"
       Effect   = "Allow"
       Action   = ["ssm:PutParameter"]
-      Resource = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/ggs/*"
+      Resource = "arn:aws:ssm:${var.aws_region}:${local.account_id}:parameter/ggs/*"
     },
     {
       # /cost コマンド: 今月合計・月末予測・予算残を表示
@@ -136,7 +161,7 @@ module "discord_control_lambda" {
       Sid      = "InvokeAutoUpdate"
       Effect   = "Allow"
       Action   = ["lambda:InvokeFunction"]
-      Resource = "arn:aws:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:function:*-auto-update"
+      Resource = "arn:aws:lambda:${var.aws_region}:${local.account_id}:function:*-auto-update"
     },
     {
       # /backup, /restore コマンド: game-stack の backup_efs Worker Lambda を非同期 invoke する
@@ -144,7 +169,7 @@ module "discord_control_lambda" {
       Sid      = "InvokeBackupEfs"
       Effect   = "Allow"
       Action   = ["lambda:InvokeFunction"]
-      Resource = "arn:aws:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:function:*-backup-efs"
+      Resource = "arn:aws:lambda:${var.aws_region}:${local.account_id}:function:*-backup-efs"
     },
     {
       # deferred response: 自分自身を非同期 invoke してコマンドをワーカー実行する。
@@ -153,7 +178,7 @@ module "discord_control_lambda" {
       Sid      = "InvokeSelf"
       Effect   = "Allow"
       Action   = ["lambda:InvokeFunction"]
-      Resource = "arn:aws:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:function:${local.function_name}"
+      Resource = "arn:aws:lambda:${var.aws_region}:${local.account_id}:function:${local.function_name}"
     }
   ]
 }

@@ -19,21 +19,19 @@ data "archive_file" "auto_update" {
   output_path = "${path.module}/functions/auto_update/auto_update.zip"
 
   # ハンドラ本体 + 共有モジュールを同梱（notify_ip と同じパターン）
-  source {
-    content  = file("${path.module}/functions/auto_update/auto_update.py")
-    filename = "auto_update.py"
+  dynamic "source" {
+    for_each = fileset("${path.module}/functions/auto_update", "*.py")
+    content {
+      content  = file("${path.module}/functions/auto_update/${source.value}")
+      filename = source.value
+    }
   }
-  source {
-    content  = file("${path.module}/functions/_shared/notifier.py")
-    filename = "notifier.py"
-  }
-  source {
-    content  = file("${path.module}/functions/_shared/aws_clients.py")
-    filename = "aws_clients.py"
-  }
-  source {
-    content  = file("${path.module}/functions/_shared/ssm_params.py")
-    filename = "ssm_params.py"
+  dynamic "source" {
+    for_each = toset(["notifier.py", "aws_clients.py", "ssm_params.py"])
+    content {
+      content  = file("${path.module}/functions/_shared/${source.value}")
+      filename = source.value
+    }
   }
 }
 
@@ -74,7 +72,7 @@ module "auto_update_lambda" {
       Sid      = "EcsRunTask"
       Effect   = "Allow"
       Action   = ["ecs:RunTask"]
-      Resource = "arn:aws:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:task-definition/${local.name_prefix}:*"
+      Resource = "arn:aws:ecs:${var.aws_region}:${local.account_id}:task-definition/${local.name_prefix}:*"
       Condition = {
         ArnEquals = { "ecs:cluster" = aws_ecs_cluster.game.arn }
       }
@@ -84,7 +82,7 @@ module "auto_update_lambda" {
       Sid      = "EcsStopTask"
       Effect   = "Allow"
       Action   = ["ecs:StopTask"]
-      Resource = "arn:aws:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:task/${local.cluster_name}/*"
+      Resource = "arn:aws:ecs:${var.aws_region}:${local.account_id}:task/${local.cluster_name}/*"
     },
     {
       # 起動中タスクの確認（二重起動ガード）
@@ -99,7 +97,7 @@ module "auto_update_lambda" {
       Sid      = "EcsDescribeService"
       Effect   = "Allow"
       Action   = ["ecs:DescribeServices"]
-      Resource = "arn:aws:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:service/${local.cluster_name}/${local.service_name}"
+      Resource = "arn:aws:ecs:${var.aws_region}:${local.account_id}:service/${local.cluster_name}/${local.service_name}"
     },
     {
       # run_task はタスクロール（task）と実行ロール（task_execution）両方の PassRole が必要
@@ -120,7 +118,7 @@ module "auto_update_lambda" {
       Sid      = "SsmStatus"
       Effect   = "Allow"
       Action   = ["ssm:GetParameter", "ssm:PutParameter"]
-      Resource = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/ggs/${local.name_prefix}/*"
+      Resource = "arn:aws:ssm:${var.aws_region}:${local.account_id}:parameter${local.ssm_prefix}/*"
     }
   ]
 }
