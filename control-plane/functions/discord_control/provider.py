@@ -220,7 +220,12 @@ class DiscordProvider:
             url,
             data=data,
             method="PATCH",
-            headers={"Content-Type": "application/json"},
+            headers={
+                "Content-Type": "application/json",
+                # デフォルトの Python-urllib UA は Cloudflare (Discord) に 403 でブロックされるため
+                # 明示的に User-Agent を指定する（notifier.py の _send_discord と同じ対策）
+                "User-Agent": "GameServerBot (https://github.com/yu-be-shi, 1.0)",
+            },
         )
         with urllib.request.urlopen(req, timeout=FOLLOWUP_TIMEOUT_SECONDS) as resp:
             logger.info("フォローアップ送信成功: status=%d app_id=%s", resp.status, app_id)
