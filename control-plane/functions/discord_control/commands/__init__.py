@@ -30,32 +30,40 @@ def autocomplete_choices(focused: str) -> list:
     return (starts + contains)[:25]  # Discord 上限 25 件
 
 
+# game 引数を取らないコマンド（引数なしでそのまま呼び出す）
+_NO_GAME_HANDLERS = {
+    "games": cmd_games,
+    "cost":  cmd_cost,
+}
+
+# game 引数を必須とするコマンド（未指定なら共通メッセージで弾く）
+_GAME_HANDLERS = {
+    "start":   cmd_start,
+    "stop":    cmd_stop,
+    "status":  cmd_status,
+    "update":  cmd_update,
+    "backup":  cmd_backup,
+    "restore": cmd_restore,
+}
+
+
 def dispatch_command(command: str, options: dict) -> str:
     """コマンド名でハンドラに振り分け、メッセージ本文（str）を返す"""
     game_name = options.get("game", "").strip()
 
-    if command == "games":
-        return cmd_games()
-    elif command == "start":
-        return cmd_start(game_name) if game_name else "ゲーム名を指定してください。"
-    elif command == "stop":
-        return cmd_stop(game_name) if game_name else "ゲーム名を指定してください。"
-    elif command == "status":
-        return cmd_status(game_name) if game_name else "ゲーム名を指定してください。"
-    elif command == "cost":
-        return cmd_cost()
-    elif command == "update":
-        return cmd_update(game_name) if game_name else "ゲーム名を指定してください。"
-    elif command == "backup":
-        return cmd_backup(game_name) if game_name else "ゲーム名を指定してください。"
-    elif command == "restore":
-        return cmd_restore(game_name) if game_name else "ゲーム名を指定してください。"
-    elif command == "switch-slot":
+    if command in _NO_GAME_HANDLERS:
+        return _NO_GAME_HANDLERS[command]()
+
+    if command in _GAME_HANDLERS:
+        return _GAME_HANDLERS[command](game_name) if game_name else "ゲーム名を指定してください。"
+
+    if command == "switch-slot":
+        # slot 引数も必須のため専用ハンドリング（テーブルには乗せない）
         slot = options.get("slot", "").strip()
         if not game_name:
             return "ゲーム名を指定してください。"
         if not slot:
             return "スロット名を指定してください。"
         return cmd_switch_slot(game_name, slot)
-    else:
-        return f"不明なコマンド: `/{command}`"
+
+    return f"不明なコマンド: `/{command}`"
