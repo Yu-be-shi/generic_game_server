@@ -21,7 +21,7 @@ import os
 from aws_clients import client as _aws_client
 from ecs_net import get_running_task_public_ip
 from notifier import send_message_safe
-from ssm_params import ssm_get, ssm_put
+from ssm_params import ssm_get, ssm_put_safe
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -60,60 +60,68 @@ def lambda_handler(event, context):
 
     # --- ECS タスク停止イベント → 停止通知 ---
     if source == "aws.ecs" and detail.get("lastStatus") == "STOPPED":
-        if send_message_safe(
-            f"⚫ **{GAME_NAME}** サーバーが完全に停止しました（ECSタスク終了）。課金は発生しません。"
-        ):
-            logger.info("停止通知送信完了")
+        _handle_stopped_event(detail)
         return
 
     # --- SSM パラメータ変更イベント → 起動完了通知 ---
     if source == "aws.ssm":
-        param_name = detail.get("name", "")
-        logger.info("SSM 変更イベント: param=%s operation=%s", param_name, detail.get("operation"))
-
-        # EventBridge は変更後の値を含まないため SSM API で取得する
-        try:
-            value = ssm_get(ssm, param_name)
-        except Exception:
-            logger.exception("SSM パラメータ取得失敗: %s", param_name)
-            return
-
-        if value != "1":
-            # ready=0 の書き込み（タスク起動時の初期化）はスキップ
-            logger.info("ready の値が '1' でないためスキップ: value=%s", value)
-            return
-
-        # 実行中タスクのパブリック IP とタスク ARN を取得
-        result = get_public_ip_from_running_task()
-        if result is None:
-            logger.warning("パブリック IP を取得できませんでした。通知をスキップします。")
-            return
-        public_ip, task_arn = result
-
-        # 同一タスクへの重複通知を排除（EventBridge at-least-once 再配信・Lambda リトライ対策）
-        if NOTIFIED_PARAM and task_arn:
-            prev = ssm_get(ssm, NOTIFIED_PARAM)
-            if prev == task_arn:
-                logger.info("同一 task_arn のためスキップ: %s", task_arn)
-                return
-
-        message = (
-            f"🟢 **{GAME_NAME}** サーバーが接続可能になりました！\n"
-            f"IP アドレス: `{public_ip}`"
-        )
-        if not send_message_safe(message):
-            return
-        logger.info("起動通知送信完了: IP=%s task_arn=%s", public_ip, task_arn)
-
-        # 通知済みタスク ARN を記録（次回の重複排除に使用）
-        if NOTIFIED_PARAM and task_arn:
-            try:
-                ssm_put(ssm, NOTIFIED_PARAM, task_arn)
-            except Exception:
-                logger.warning("notified_task の記録に失敗（次回重複する可能性あり）")
+        _handle_ssm_ready_event(detail)
         return
 
     logger.warning("未知のイベント source=%s", source)
+
+
+def _handle_stopped_event(detail):
+    """ECS タスク停止イベント（aws.ecs, lastStatus=STOPPED）を処理し停止通知を送る"""
+    if send_message_safe(
+        f"⚫ **{GAME_NAME}** サーバーが完全に停止しました（ECSタスク終了）。課金は発生しません。"
+    ):
+        logger.info("停止通知送信完了")
+
+
+def _handle_ssm_ready_event(detail):
+    """SSM ready パラメータ変更イベント（aws.ssm）を処理し起動完了通知を送る"""
+    param_name = detail.get("name", "")
+    logger.info("SSM 変更イベント: param=%s operation=%s", param_name, detail.get("operation"))
+
+    # EventBridge は変更後の値を含まないため SSM API で取得する
+    try:
+        value = ssm_get(ssm, param_name)
+    except Exception:
+        logger.exception("SSM パラメータ取得失敗: %s", param_name)
+        return
+
+    if value != "1":
+        # ready=0 の書き込み（タスク起動時の初期化）はスキップ
+        logger.info("ready の値が '1' でないためスキップ: value=%s", value)
+        return
+
+    # 実行中タスクのパブリック IP とタスク ARN を取得
+    result = get_public_ip_from_running_task()
+    if result is None:
+        logger.warning("パブリック IP を取得できませんでした。通知をスキップします。")
+        return
+    public_ip, task_arn = result
+
+    # 同一タスクへの重複通知を排除（EventBridge at-least-once 再配信・Lambda リトライ対策）
+    if NOTIFIED_PARAM and task_arn:
+        prev = ssm_get(ssm, NOTIFIED_PARAM)
+        if prev == task_arn:
+            logger.info("同一 task_arn のためスキップ: %s", task_arn)
+            return
+
+    message = (
+        f"🟢 **{GAME_NAME}** サーバーが接続可能になりました！\n"
+        f"IP アドレス: `{public_ip}`"
+    )
+    if not send_message_safe(message):
+        return
+    logger.info("起動通知送信完了: IP=%s task_arn=%s", public_ip, task_arn)
+
+    # 通知済みタスク ARN を記録（次回の重複排除に使用）
+    if NOTIFIED_PARAM and task_arn:
+        if not ssm_put_safe(ssm, NOTIFIED_PARAM, task_arn):
+            logger.warning("notified_task の記録に失敗（次回重複する可能性あり）")
 
 
 def get_public_ip_from_running_task():

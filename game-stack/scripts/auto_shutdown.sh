@@ -370,6 +370,33 @@ PYEOF
 }
 
 # ------------------------------------------------------------------
+# backup_efs_to_s3: 停止前に EFS の内容を S3 へ同期する
+# BACKUP_BUCKET 未設定・EFS 未マウントの場合は安全のためスキップする（fail-open）。
+# ------------------------------------------------------------------
+backup_efs_to_s3() {
+    if [ -z "${BACKUP_BUCKET:-}" ]; then
+        return 0
+    fi
+
+    # EFS_MOUNT_PATH が未設定またはマウントされていない場合はバックアップをスキップ
+    # （未検証のまま s3 sync を実行すると aws s3 sync "/" ... でルート全体を同期する危険がある）
+    if ! _efs_available; then
+        log "警告: EFS_MOUNT_PATH が未設定またはマウントされていません (${EFS_MOUNT_PATH:-<未設定>})。バックアップをスキップします。停止処理は継続します。"
+        return 0
+    fi
+
+    log "停止前バックアップ開始: ${EFS_MOUNT_PATH} -> s3://${BACKUP_BUCKET}/${BACKUP_PREFIX}/"
+    if aws s3 sync "${EFS_MOUNT_PATH}/" "s3://${BACKUP_BUCKET}/${BACKUP_PREFIX}/" \
+        --region "${AWS_REGION}" \
+        --no-progress \
+        2>&1; then
+        log "バックアップ完了"
+    else
+        log "警告: バックアップ同期に失敗しました。停止処理は継続します。"
+    fi
+}
+
+# ------------------------------------------------------------------
 # do_shutdown: 停止前バックアップ → ECS desired-count=0 → exit
 # ------------------------------------------------------------------
 do_shutdown() {
@@ -378,23 +405,7 @@ do_shutdown() {
     log "aws ecs update-service --desired-count 0"
     log "========================================"
 
-    if [ -n "${BACKUP_BUCKET:-}" ]; then
-        # EFS_MOUNT_PATH が未設定またはマウントされていない場合はバックアップをスキップ
-        # （未検証のまま s3 sync を実行すると aws s3 sync "/" ... でルート全体を同期する危険がある）
-        if ! _efs_available; then
-            log "警告: EFS_MOUNT_PATH が未設定またはマウントされていません (${EFS_MOUNT_PATH:-<未設定>})。バックアップをスキップします。停止処理は継続します。"
-        else
-            log "停止前バックアップ開始: ${EFS_MOUNT_PATH} -> s3://${BACKUP_BUCKET}/${BACKUP_PREFIX}/"
-            if aws s3 sync "${EFS_MOUNT_PATH}/" "s3://${BACKUP_BUCKET}/${BACKUP_PREFIX}/" \
-                --region "${AWS_REGION}" \
-                --no-progress \
-                2>&1; then
-                log "バックアップ完了"
-            else
-                log "警告: バックアップ同期に失敗しました。停止処理は継続します。"
-            fi
-        fi
-    fi
+    backup_efs_to_s3
 
     if aws ecs update-service \
         --cluster "${CLUSTER_NAME}" \
