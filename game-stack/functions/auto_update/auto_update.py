@@ -72,6 +72,11 @@ STARTED_BY = "ggs-auto-update"
 # ポーリング設定
 POLL_INTERVAL_S = 15      # SSM update_ready をチェックする間隔（秒）
 POLL_TIMEOUT_S  = 720     # ポーリング上限（12分）。Lambda timeout(900s) より余裕を持たせる
+REMAINING_TIME_THRESHOLD_MS = 60_000  # この残時間未満で打ち切り（stop_task の余裕確保）
+
+# run_task の containerOverrides で上書き対象のコンテナ名（タスク定義との契約。値は変更不可）
+GAME_CONTAINER_NAME    = "game"
+MONITOR_CONTAINER_NAME = "monitor"
 
 ecs = _aws_client("ecs")
 ssm = _aws_client("ssm")
@@ -96,23 +101,9 @@ def lambda_handler(event, context):
 
     # 2. Steam バージョン事前チェック（STEAM_APP_ID 設定時のみ）
     #    コンテナ起動前に Lambda から直接照合 → 最新なら数秒で完了（コンテナ不要）
-    if STEAM_APP_ID:
-        latest    = _latest_steam_buildid()
-        installed = _installed_buildid()
-        if latest and installed and latest == installed:
-            msg = (
-                f"✅ **{GAME_NAME}** は既に最新バージョンです（build `{installed}`）。\n"
-                "更新不要のためコンテナは起動しません。"
-            )
-            logger.info(
-                "Steam バージョンチェック: 最新 build=%s = インストール済み → スキップ", installed
-            )
-            send_message_safe(msg)
-            return {"status": "skipped_up_to_date", "buildId": installed}
-        logger.info(
-            "Steam バージョンチェック: latest=%s installed=%s → アップデート実行",
-            latest, installed,
-        )
+    skip_result = _is_up_to_date()
+    if skip_result:
+        return skip_result
 
     task_arn = None
     success = False
@@ -137,21 +128,8 @@ def lambda_handler(event, context):
         logger.exception("アップデート処理中に例外が発生")
 
     finally:
-        # 6. 完了・タイムアウト・例外いずれでも必ず停止（ハング時の唯一の停止経路）
-        if task_arn:
-            try:
-                ecs.stop_task(
-                    cluster=CLUSTER_ARN,
-                    task=task_arn,
-                    reason="auto-update complete (managed by ggs-auto-update Lambda)",
-                )
-                logger.info("stop_task 完了: %s", task_arn)
-            except Exception:
-                logger.exception("stop_task 失敗（タスクはすでに停止済みの可能性）")
-
-        # 7. メンテナンスフラグを必ず解除
-        ssm_put_safe(ssm, MAINT_PARAM, "0")
-        logger.info("maintenance=0 を解除")
+        # 6-7. 完了・タイムアウト・例外いずれでも必ず後始末する（ハング時の唯一の停止経路）
+        _cleanup(task_arn)
 
     # 8. 完了通知
     if success:
@@ -171,6 +149,58 @@ def lambda_handler(event, context):
 # ---------------------------------------------------------------
 # 内部関数
 # ---------------------------------------------------------------
+
+def _is_up_to_date():
+    """
+    Steam バージョン事前チェック（STEAM_APP_ID 設定時のみ）。
+
+    最新バージョンと確認できた場合はスキップ用のレスポンス dict
+    （lambda_handler がそのまま return する）を返す。
+    チェック対象外（STEAM_APP_ID 未設定）・判定不能・要アップデートの場合は None を返す。
+    """
+    if not STEAM_APP_ID:
+        return None
+
+    latest    = _latest_steam_buildid()
+    installed = _installed_buildid()
+    if latest and installed and latest == installed:
+        msg = (
+            f"✅ **{GAME_NAME}** は既に最新バージョンです（build `{installed}`）。\n"
+            "更新不要のためコンテナは起動しません。"
+        )
+        logger.info(
+            "Steam バージョンチェック: 最新 build=%s = インストール済み → スキップ", installed
+        )
+        send_message_safe(msg)
+        return {"status": "skipped_up_to_date", "buildId": installed}
+
+    logger.info(
+        "Steam バージョンチェック: latest=%s installed=%s → アップデート実行",
+        latest, installed,
+    )
+    return None
+
+
+def _cleanup(task_arn):
+    """
+    完了・タイムアウト・例外いずれの場合でも lambda_handler の finally から必ず呼ばれる後始末。
+    ワンオフタスクの停止（task_arn がある場合のみ）とメンテナンスフラグの解除を行う。
+    stop_task の失敗は握りつぶす（タスクがすでに停止済みの可能性があるため）。
+    """
+    if task_arn:
+        try:
+            ecs.stop_task(
+                cluster=CLUSTER_ARN,
+                task=task_arn,
+                reason="auto-update complete (managed by ggs-auto-update Lambda)",
+            )
+            logger.info("stop_task 完了: %s", task_arn)
+        except Exception:
+            logger.exception("stop_task 失敗（タスクはすでに停止済みの可能性）")
+
+    ssm_put_safe(ssm, MAINT_PARAM, "0")
+    logger.info("maintenance=0 を解除")
+
 
 def _server_running() -> bool:
     """
@@ -228,14 +258,14 @@ def _run_update_task() -> str:
         overrides={
             "containerOverrides": [
                 {
-                    "name": "game",
+                    "name": GAME_CONTAINER_NAME,
                     "environment": [
                         # UPDATE_ON_BOOT のみ上書き。他のゲーム固有 env はマージで保持される
                         {"name": "UPDATE_ON_BOOT", "value": "true"},
                     ],
                 },
                 {
-                    "name": "monitor",
+                    "name": MONITOR_CONTAINER_NAME,
                     "environment": [
                         # EventBridge ルール無しの param に向けて誤 IP 通知を防ぐ
                         {"name": "READY_PARAM",   "value": UPDATE_READY_PARAM},
@@ -273,7 +303,7 @@ def _poll_ready(context) -> bool:
 
     while time.time() < deadline:
         # Lambda 残時間が 60 秒未満になったら打ち切り（stop_task のための余裕を確保）
-        if context.get_remaining_time_in_millis() < 60_000:
+        if context.get_remaining_time_in_millis() < REMAINING_TIME_THRESHOLD_MS:
             logger.warning("Lambda 残時間不足（< 60s）のためポーリングを打ち切り")
             return False
 
