@@ -1,7 +1,7 @@
 """
 notifier.py - メッセージング Webhook 送信ユーティリティ（共有モジュール）
 
-game-stack の複数 Lambda（notify_ip, notify_cost）から共用される。
+game-stack の複数 Lambda（notify_ip, notify_cost, cost_guard, auto_update）から共用される。
 MESSAGING_PROVIDER 環境変数（既定: "discord"）でプロバイダーを選択する。
 
 Slack への差し替え:
@@ -87,6 +87,20 @@ def send_message_safe(text: str) -> bool:
     except Exception:
         logger.warning("通知送信失敗（継続）: %s", text[:80], exc_info=True)
         return False
+
+
+def send_block_safe(title: str, body: str) -> bool:
+    """
+    「タイトル行 + コードブロック本文」の定型通知を送信する（fire-and-forget）。
+
+    Args:
+        title: コードブロックの前に置く行。絵文字・**強調** は呼び出し側が含める
+               （例: "💸 **AWS コストアラート**"）
+        body: コードブロック内に入れる本文
+    Returns:
+        送信に成功したら True、失敗したら False
+    """
+    return send_message_safe(f"{title}\n```\n{body}\n```")
 
 
 def _send_discord(content: str) -> None:

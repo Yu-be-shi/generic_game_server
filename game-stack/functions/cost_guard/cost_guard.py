@@ -18,7 +18,7 @@ import os
 from datetime import datetime, timezone
 
 from aws_clients import client as _aws_client
-from notifier import send_message_safe
+from notifier import send_block_safe
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -158,13 +158,10 @@ def _prevent_service_restart(cluster_arn, service_name):
 
 def _notify_stopped(game_name, max_runtime_hours, stopped_count):
     """強制停止を Discord/Slack に通知する。"""
-    content = (
-        f"⚠️ **{game_name} コストガード発動**\n"
-        f"```\n"
+    send_block_safe(
+        f"⚠️ **{game_name} コストガード発動**",
         f"{max_runtime_hours:.0f}時間以上稼働しているタスクを検出し、強制停止しました。\n"
         f"停止タスク数: {stopped_count}\n"
         f"\n"
-        f"監視サイドカーが正常に動作しているか CloudWatch Logs で確認してください。\n"
-        f"```"
+        f"監視サイドカーが正常に動作しているか CloudWatch Logs で確認してください。",
     )
-    send_message_safe(content)
