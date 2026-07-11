@@ -25,6 +25,10 @@ logger.setLevel(logging.INFO)
 
 ecs = _aws_client("ecs")
 
+SECONDS_PER_HOUR = 3600
+# ECS describe_tasks の最大タスク数 / リクエスト（API 制限）
+DESCRIBE_TASKS_BATCH = 100
+
 
 def lambda_handler(event, context):
     cluster_arn = os.environ["CLUSTER_ARN"]
@@ -54,24 +58,45 @@ def _check_and_stop(cluster_arn, service_name, max_runtime_hours, game_name):
     クラスター内の RUNNING タスクを検査し、閾値超過タスクを強制停止する。
     戻り値: 停止した task ARN のリスト
     """
+    # 経過時間の基準時刻はタスク列挙前に固定する
     now = datetime.now(timezone.utc)
-    threshold_seconds = max_runtime_hours * 3600
 
-    # RUNNING タスク ARN を全列挙（ページング対応）
+    tasks = _list_running_tasks(cluster_arn)
+    if not tasks:
+        return []
+
+    stopped, service_stop_needed = _stop_expired_tasks(
+        tasks, cluster_arn, service_name, max_runtime_hours, now
+    )
+    if service_stop_needed:
+        _prevent_service_restart(cluster_arn, service_name)
+    if stopped:
+        _notify_stopped(game_name, max_runtime_hours, len(stopped))
+    return stopped
+
+
+def _list_running_tasks(cluster_arn):
+    """RUNNING タスクを全列挙し describe_tasks の詳細を返す。"""
     task_arns = []
     paginator = ecs.get_paginator("list_tasks")
     for page in paginator.paginate(cluster=cluster_arn, desiredStatus="RUNNING"):
         task_arns.extend(page["taskArns"])
 
-    if not task_arns:
-        return []
-
-    # describe_tasks は最大 100 件 / リクエスト
     tasks = []
-    for i in range(0, len(task_arns), 100):
-        resp = ecs.describe_tasks(cluster=cluster_arn, tasks=task_arns[i : i + 100])
+    for i in range(0, len(task_arns), DESCRIBE_TASKS_BATCH):
+        resp = ecs.describe_tasks(
+            cluster=cluster_arn, tasks=task_arns[i : i + DESCRIBE_TASKS_BATCH]
+        )
         tasks.extend(resp.get("tasks", []))
+    return tasks
 
+
+def _stop_expired_tasks(tasks, cluster_arn, service_name, max_runtime_hours, now):
+    """
+    閾値超過タスクを stop_task で停止する。
+    戻り値: (停止した task ARN のリスト, サービスタスクを停止したか)
+    """
+    threshold_seconds = max_runtime_hours * SECONDS_PER_HOUR
     stopped = []
     service_stop_needed = False
 
@@ -86,7 +111,7 @@ def _check_and_stop(cluster_arn, service_name, max_runtime_hours, game_name):
             continue
 
         task_arn = task["taskArn"]
-        elapsed_hours = elapsed_seconds / 3600
+        elapsed_hours = elapsed_seconds / SECONDS_PER_HOUR
         task_group = task.get("group", "")
         is_service_task = task_group == f"service:{service_name}"
 
@@ -114,30 +139,32 @@ def _check_and_stop(cluster_arn, service_name, max_runtime_hours, game_name):
         except Exception:
             logger.exception("Failed to stop task %s", task_arn)
 
-    # サービスタスクを停止した場合は desiredCount=0 にして再起動を防ぐ
-    # （監視サイドカーの do_shutdown と同等の最終手段）
-    if service_stop_needed:
-        try:
-            ecs.update_service(
-                cluster=cluster_arn,
-                service=service_name,
-                desiredCount=0,
-            )
-            logger.info("Set service %s desiredCount=0 to prevent restart.", service_name)
-        except Exception:
-            logger.exception("Failed to set desiredCount=0 for service %s", service_name)
+    return stopped, service_stop_needed
 
-    # Discord/Slack 通知
-    if stopped:
-        content = (
-            f"⚠️ **{game_name} コストガード発動**\n"
-            f"```\n"
-            f"{max_runtime_hours:.0f}時間以上稼働しているタスクを検出し、強制停止しました。\n"
-            f"停止タスク数: {len(stopped)}\n"
-            f"\n"
-            f"監視サイドカーが正常に動作しているか CloudWatch Logs で確認してください。\n"
-            f"```"
+
+def _prevent_service_restart(cluster_arn, service_name):
+    """desiredCount=0 にしてサービスによるタスク再起動を防ぐ。
+    （監視サイドカーの do_shutdown と同等の最終手段）"""
+    try:
+        ecs.update_service(
+            cluster=cluster_arn,
+            service=service_name,
+            desiredCount=0,
         )
-        send_message_safe(content)
+        logger.info("Set service %s desiredCount=0 to prevent restart.", service_name)
+    except Exception:
+        logger.exception("Failed to set desiredCount=0 for service %s", service_name)
 
-    return stopped
+
+def _notify_stopped(game_name, max_runtime_hours, stopped_count):
+    """強制停止を Discord/Slack に通知する。"""
+    content = (
+        f"⚠️ **{game_name} コストガード発動**\n"
+        f"```\n"
+        f"{max_runtime_hours:.0f}時間以上稼働しているタスクを検出し、強制停止しました。\n"
+        f"停止タスク数: {stopped_count}\n"
+        f"\n"
+        f"監視サイドカーが正常に動作しているか CloudWatch Logs で確認してください。\n"
+        f"```"
+    )
+    send_message_safe(content)
