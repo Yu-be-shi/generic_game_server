@@ -152,6 +152,11 @@ resource "aws_sns_topic_subscription" "cost_alert_to_email" {
 # AWS Budgets（月間コスト予算・4段階アラート）
 # ============================================================
 
+locals {
+  # 月間予算に対する段階通知の閾値（実績コストが予算の n% を超えたら SNS 通知）
+  budget_alert_thresholds = [20, 50, 80, 100]
+}
+
 resource "aws_budgets_budget" "monthly" {
   account_id        = local.account_id
   name              = "${local.name_prefix}-monthly-budget"
@@ -161,35 +166,14 @@ resource "aws_budgets_budget" "monthly" {
   time_unit         = "MONTHLY"
   time_period_start = "2024-01-01_00:00"
 
-  notification {
-    comparison_operator       = "GREATER_THAN"
-    threshold                 = 20
-    threshold_type            = "PERCENTAGE"
-    notification_type         = "ACTUAL"
-    subscriber_sns_topic_arns = [aws_sns_topic.cost_alert.arn]
-  }
-
-  notification {
-    comparison_operator       = "GREATER_THAN"
-    threshold                 = 50
-    threshold_type            = "PERCENTAGE"
-    notification_type         = "ACTUAL"
-    subscriber_sns_topic_arns = [aws_sns_topic.cost_alert.arn]
-  }
-
-  notification {
-    comparison_operator       = "GREATER_THAN"
-    threshold                 = 80
-    threshold_type            = "PERCENTAGE"
-    notification_type         = "ACTUAL"
-    subscriber_sns_topic_arns = [aws_sns_topic.cost_alert.arn]
-  }
-
-  notification {
-    comparison_operator       = "GREATER_THAN"
-    threshold                 = 100
-    threshold_type            = "PERCENTAGE"
-    notification_type         = "ACTUAL"
-    subscriber_sns_topic_arns = [aws_sns_topic.cost_alert.arn]
+  dynamic "notification" {
+    for_each = local.budget_alert_thresholds
+    content {
+      comparison_operator       = "GREATER_THAN"
+      threshold                 = notification.value
+      threshold_type            = "PERCENTAGE"
+      notification_type         = "ACTUAL"
+      subscriber_sns_topic_arns = [aws_sns_topic.cost_alert.arn]
+    }
   }
 }
