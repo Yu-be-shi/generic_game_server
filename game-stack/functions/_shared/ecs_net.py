@@ -1,8 +1,8 @@
 """
-ecs_net.py - ECS RUNNING タスクのパブリック IP 取得ヘルパー（game-stack 共有）
+ecs_net.py - ECS RUNNING タスクのパブリック IP 取得ヘルパー（全 Lambda 共有・単一ソース）
 
-control-plane/functions/discord_control/ecs_net.py に同一内容の複製がある
-（Terraform root module が別のため import 不可。修正時は両方を同期させること）。
+control-plane/main.tf は archive_file の dynamic "source" でこのファイルを
+そのまま discord_control Lambda の zip に取り込む（コピーは存在しない）。
 """
 
 

@@ -1,8 +1,8 @@
 """
-aws_clients.py - リージョン解決・boto3 クライアント生成ユーティリティ（game-stack 共有）
+aws_clients.py - リージョン解決・boto3 クライアント生成ユーティリティ（全 Lambda 共有・単一ソース）
 
-control-plane/functions/discord_control/aws_clients.py に並行実装がある
-（region 解決ロジックが異なる独立ファイルのため、修正時は両方を確認すること）。
+control-plane/main.tf は archive_file の dynamic "source" でこのファイルを
+そのまま discord_control Lambda の zip に取り込む（コピーは存在しない）。
 """
 
 import os
@@ -13,8 +13,12 @@ DEFAULT_REGION = "ap-northeast-1"
 
 
 def region() -> str:
-    """Lambda ランタイムが注入する AWS_REGION を返す（未設定時は DEFAULT_REGION）。"""
-    return os.environ.get("AWS_REGION", DEFAULT_REGION)
+    """
+    Lambda ランタイムが注入する AWS_REGION を返す。
+    GAME_AWS_REGION が設定されていればそちらを優先する
+    （discord_control Lambda は control-plane/main.tf で明示的にこれを注入する）。
+    """
+    return os.environ.get("GAME_AWS_REGION") or os.environ.get("AWS_REGION", DEFAULT_REGION)
 
 
 def client(service_name: str, region_name: str = None):
