@@ -61,6 +61,11 @@ CHECK_INTERVAL="${CHECK_INTERVAL:-60}"
 READY_POLL_INTERVAL="${READY_POLL_INTERVAL:-10}"
 STARTUP_GRACE_MINUTES="${STARTUP_GRACE_MINUTES:-30}"
 
+# クエリ用（_query_a2s/_query_rest の Python 側で重複していた値をここに集約）。
+# python3 サブプロセスから os.environ 経由で読むため export する。
+export QUERY_TIMEOUT_SECONDS="${QUERY_TIMEOUT_SECONDS:-5}"
+export MONITOR_HOST="${MONITOR_HOST:-127.0.0.1}"
+
 # =============================================================================
 # 共通ヘルパー
 # =============================================================================
@@ -96,29 +101,21 @@ _efs_available() {
     [ -n "${EFS_MOUNT_PATH:-}" ] && [ -d "${EFS_MOUNT_PATH}" ]
 }
 
-log "=========================================="
-log "自動シャットダウン監視スクリプト 起動"
-log "クラスター  : ${CLUSTER_NAME}"
-log "サービス    : ${SERVICE_NAME}"
-log "リージョン  : ${AWS_REGION}"
-log "監視ポート  : ${MONITOR_PORT}/${MONITOR_PROTOCOL}"
-log "アイドル上限: ${IDLE_MINUTES} 分"
-log "チェック間隔（アイドル監視）: ${CHECK_INTERVAL} 秒"
-log "ポーリング間隔（受付待ち）  : ${READY_POLL_INTERVAL} 秒"
-log "起動タイムアウト            : ${STARTUP_GRACE_MINUTES} 分"
-log "=========================================="
-
-# =============================================================================
-# 依存パッケージのインストール（amazonlinux:2023 ベースイメージ）
+# ------------------------------------------------------------------
+# ensure_dependencies: 依存パッケージ（iproute の ss・aws-cli）をインストールする
 # iproute: ss コマンドの提供元
 # aws-cli: aws ecs update-service / aws ssm put-parameter の実行に使用
-# =============================================================================
+#
 # 事前ビルドイメージ（monitor_image に依存パッケージ入りを設定した場合）は
 # すでに aws・ss が存在するためインストールをスキップする。
-# 素の amazonlinux:2023（既定値）の場合は従来どおり dnf でインストールする。
-if command -v aws > /dev/null 2>&1 && command -v ss > /dev/null 2>&1; then
-    log "依存パッケージは事前インストール済みです。インストールをスキップします。"
-else
+# 素の amazonlinux:2023（既定値）の場合は dnf → 失敗時 pip3 の順にフォールバックする。
+# ------------------------------------------------------------------
+ensure_dependencies() {
+    if command -v aws > /dev/null 2>&1 && command -v ss > /dev/null 2>&1; then
+        log "依存パッケージは事前インストール済みです。インストールをスキップします。"
+        return 0
+    fi
+
     log "依存パッケージをインストール中（事前ビルドイメージを使うと省略できます）..."
 
     if dnf install -y --quiet iproute python3 aws-cli 2>&1; then
@@ -135,7 +132,24 @@ else
         log "エラー: AWS CLI が見つかりません。監視を中断します。"
         exit 1
     fi
-fi
+}
+
+log "=========================================="
+log "自動シャットダウン監視スクリプト 起動"
+log "クラスター  : ${CLUSTER_NAME}"
+log "サービス    : ${SERVICE_NAME}"
+log "リージョン  : ${AWS_REGION}"
+log "監視ポート  : ${MONITOR_PORT}/${MONITOR_PROTOCOL}"
+log "アイドル上限: ${IDLE_MINUTES} 分"
+log "チェック間隔（アイドル監視）: ${CHECK_INTERVAL} 秒"
+log "ポーリング間隔（受付待ち）  : ${READY_POLL_INTERVAL} 秒"
+log "起動タイムアウト            : ${STARTUP_GRACE_MINUTES} 分"
+log "=========================================="
+
+# =============================================================================
+# 依存パッケージのインストール（amazonlinux:2023 ベースイメージ）
+# =============================================================================
+ensure_dependencies
 
 log "セットアップ完了。"
 
@@ -163,7 +177,8 @@ _query_a2s() {
 import os, socket, sys
 
 PORT = int(os.environ["MONITOR_PORT"])
-TIMEOUT = 5
+TIMEOUT = int(os.environ.get("QUERY_TIMEOUT_SECONDS", "5"))
+HOST = os.environ.get("MONITOR_HOST", "127.0.0.1")
 
 def query_players(host, port):
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -200,7 +215,7 @@ def query_players(host, port):
     finally:
         s.close()
 
-query_players("127.0.0.1", PORT)
+query_players(HOST, PORT)
 PYEOF
 }
 
@@ -214,9 +229,10 @@ import urllib.request, urllib.error
 
 PORT = int(os.environ.get("REST_API_PORT", "8212"))
 PASSWORD = os.environ.get("REST_API_PASSWORD", "")
-TIMEOUT = 5
+TIMEOUT = int(os.environ.get("QUERY_TIMEOUT_SECONDS", "5"))
+HOST = os.environ.get("MONITOR_HOST", "127.0.0.1")
 
-url = "http://127.0.0.1:{}/v1/api/players".format(PORT)
+url = "http://{}:{}/v1/api/players".format(HOST, PORT)
 credentials = base64.b64encode("admin:{}".format(PASSWORD).encode()).decode()
 req = urllib.request.Request(
     url,
