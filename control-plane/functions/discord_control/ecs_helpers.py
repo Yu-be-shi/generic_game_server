@@ -13,10 +13,14 @@ from ssm_params import ssm_get, ssm_get_parameter
 logger = logging.getLogger()
 
 
-def list_game_clusters() -> list:
+def _list_game_clusters_info() -> list:
     """
-    全クラスターの中から Game タグが付いているものを返す。
-    各エントリに game_tag, cluster_arn, desired_count, running_count を含む。
+    Game タグが付いた ECS クラスターの describe_clusters 結果を返す。
+
+    list_game_clusters / list_game_names / find_service が共通で行う
+    「list_clusters → describe_clusters(include=["TAGS"]) → Game タグ抽出」を集約する。
+    各エントリは {"cluster_arn": ..., "game_tag": ...}。
+    取得失敗時は空リストを返す（呼び出し元は例外を気にせずフォールバックできる）。
     """
     try:
         cluster_arns = ecs.list_clusters()["clusterArns"]
@@ -29,27 +33,36 @@ def list_game_clusters() -> list:
 
     clusters_info = ecs.describe_clusters(clusters=cluster_arns, include=["TAGS"])["clusters"]
     result = []
-
     for c in clusters_info:
-        # Game タグがあるクラスターのみ対象
         game_tag = next((t["value"] for t in c.get("tags", []) if t["key"] == "Game"), None)
         if not game_tag:
             continue
+        result.append({"cluster_arn": c["clusterArn"], "game_tag": game_tag})
+    return result
 
+
+def list_game_clusters() -> list:
+    """
+    全クラスターの中から Game タグが付いているものを返す。
+    各エントリに game_tag, cluster_arn, desired_count, running_count を含む。
+    """
+    result = []
+    for entry in _list_game_clusters_info():
+        cluster_arn = entry["cluster_arn"]
         desired, running = 0, 0
         try:
-            svc_arns = ecs.list_services(cluster=c["clusterArn"])["serviceArns"]
+            svc_arns = ecs.list_services(cluster=cluster_arn)["serviceArns"]
             if svc_arns:
-                svc = ecs.describe_services(cluster=c["clusterArn"], services=svc_arns)["services"]
+                svc = ecs.describe_services(cluster=cluster_arn, services=svc_arns)["services"]
                 if svc:
                     desired = svc[0].get("desiredCount", 0)
                     running = svc[0].get("runningCount", 0)
         except Exception:
-            logger.exception("サービス情報の取得に失敗: %s", c["clusterArn"])
+            logger.exception("サービス情報の取得に失敗: %s", cluster_arn)
 
         result.append({
-            "game_tag":     game_tag,
-            "cluster_arn":  c["clusterArn"],
+            "game_tag":     entry["game_tag"],
+            "cluster_arn":  cluster_arn,
             "desired_count": desired,
             "running_count": running,
         })
@@ -65,16 +78,7 @@ def list_game_names() -> list:
     タグ取得のみで済ませる（Discord の ~3 秒 autocomplete 制限に収めるため）。
     """
     try:
-        cluster_arns = ecs.list_clusters()["clusterArns"]
-        if not cluster_arns:
-            return []
-        clusters_info = ecs.describe_clusters(clusters=cluster_arns, include=["TAGS"])["clusters"]
-        names = [
-            t["value"]
-            for c in clusters_info
-            for t in c.get("tags", [])
-            if t["key"] == "Game"
-        ]
+        names = [entry["game_tag"] for entry in _list_game_clusters_info()]
         return sorted(names)
     except Exception:
         logger.exception("list_game_names 失敗")
@@ -91,28 +95,21 @@ def find_service(game_name: str):
       2. Game タグへの一意な部分一致（autocomplete 未使用で手打ちした場合の救済）
          複数候補がある場合はあいまいなため not found とする。
     """
-    try:
-        cluster_arns = ecs.list_clusters()["clusterArns"]
-    except Exception:
+    clusters_info = _list_game_clusters_info()
+    if not clusters_info:
         return None, None
 
-    if not cluster_arns:
-        return None, None
-
-    clusters_info = ecs.describe_clusters(clusters=cluster_arns, include=["TAGS"])["clusters"]
     name_lower = game_name.lower()
 
     exact_match   = None      # (cluster_arn, svc_arn)
     partial_matches = []      # [(cluster_arn, svc_arn)]
 
-    for c in clusters_info:
-        tags     = {t["key"]: t["value"] for t in c.get("tags", [])}
-        game_tag = tags.get("Game", "")
-        if not game_tag:
-            continue
+    for entry in clusters_info:
+        cluster_arn = entry["cluster_arn"]
+        game_tag    = entry["game_tag"]
 
         try:
-            svc_arns = ecs.list_services(cluster=c["clusterArn"])["serviceArns"]
+            svc_arns = ecs.list_services(cluster=cluster_arn)["serviceArns"]
         except Exception:
             continue
 
@@ -120,11 +117,11 @@ def find_service(game_name: str):
             continue
 
         if game_tag.lower() == name_lower:
-            exact_match = (c["clusterArn"], svc_arns[0])
+            exact_match = (cluster_arn, svc_arns[0])
             break  # 完全一致が見つかれば即確定
 
         if name_lower in game_tag.lower():
-            partial_matches.append((c["clusterArn"], svc_arns[0]))
+            partial_matches.append((cluster_arn, svc_arns[0]))
 
     if exact_match:
         return exact_match

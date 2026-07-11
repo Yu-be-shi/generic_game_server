@@ -36,7 +36,7 @@ import urllib.request
 
 from aws_clients import client as _aws_client
 from notifier import send_message_safe
-from ssm_params import ssm_get, ssm_put
+from ssm_params import ssm_get, ssm_put_safe
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -118,8 +118,8 @@ def lambda_handler(event, context):
     success = False
     try:
         # 3. メンテナンスフラグ + update_ready を先行リセット（/start 拒否 & stale値排除）
-        _put(MAINT_PARAM, "1")
-        _put(UPDATE_READY_PARAM, "0")
+        ssm_put_safe(ssm, MAINT_PARAM, "1")
+        ssm_put_safe(ssm, UPDATE_READY_PARAM, "0")
         logger.info("maintenance=1, update_ready=0 を設定")
 
         # 4. UPDATE_ON_BOOT=true のワンオフタスクを起動
@@ -150,7 +150,7 @@ def lambda_handler(event, context):
                 logger.exception("stop_task 失敗（タスクはすでに停止済みの可能性）")
 
         # 7. メンテナンスフラグを必ず解除
-        _put(MAINT_PARAM, "0")
+        ssm_put_safe(ssm, MAINT_PARAM, "0")
         logger.info("maintenance=0 を解除")
 
     # 8. 完了通知
@@ -353,14 +353,5 @@ def _installed_buildid() -> "str | None":
     except Exception:
         logger.warning("installed_buildid の取得に失敗しました（fail-open）", exc_info=True)
         return None
-
-
-def _put(name: str, value: str) -> None:
-    """SSM パラメータを上書きする。失敗しても継続（ログに警告）。"""
-    try:
-        ssm_put(ssm, name, value)
-        logger.debug("SSM put: %s = %s", name, value)
-    except Exception:
-        logger.warning("SSM put_parameter 失敗: name=%s value=%s", name, value, exc_info=True)
 
 

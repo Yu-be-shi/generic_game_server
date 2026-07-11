@@ -4,7 +4,7 @@ import logging
 import ecs_helpers
 from clients import ecs, ssm
 from commands.guards import is_under_maintenance, require_service
-from ssm_params import ssm_put
+from ssm_params import ssm_put_safe
 
 logger = logging.getLogger()
 
@@ -55,10 +55,9 @@ def cmd_start(game_name: str) -> str:
     # (notify_ip.py は value!="1" をスキップするため誤通知なし)
     ssm_prefix = ecs_helpers.get_cluster_tag(cluster_arn, "StatusParamPrefix")
     if ssm_prefix:
-        try:
-            ssm_put(ssm, f"{ssm_prefix}/ready", "0")
+        if ssm_put_safe(ssm, f"{ssm_prefix}/ready", "0"):
             logger.info("/start: SSM ready を 0 にリセット: %s/ready", ssm_prefix)
-        except Exception:
+        else:
             logger.warning("/start: SSM ready のリセットに失敗（権限確認を）: %s/ready", ssm_prefix)
 
     return (
