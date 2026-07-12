@@ -153,7 +153,7 @@ module "backup_efs_package" {
 
   source_dir   = "${path.module}/functions/backup_efs"
   shared_dir   = "${path.module}/functions/_shared"
-  shared_files = ["ssm_params.py"]
+  shared_files = []
   output_path  = "${path.module}/functions/backup_efs/backup_efs.zip"
 }
 
@@ -189,9 +189,10 @@ module "backup_efs_lambda" {
   }
 
   environment_variables = {
-    BACKUP_BUCKET     = aws_s3_bucket.backup.id
-    BACKUP_PREFIX     = local.backup_prefix
-    ACTIVE_SLOT_PARAM = "${local.ssm_prefix}/active_slot"
+    BACKUP_BUCKET = aws_s3_bucket.backup.id
+    BACKUP_PREFIX = local.backup_prefix
+    # アクティブスロットの状態は SSM ではなく S3 オブジェクト（slots/_active_slot）で管理する。
+    # この Lambda は VPC 内（NAT なし・S3 Gateway エンドポイントのみ）のため SSM に到達できない。
   }
 
   extra_iam_statements = [
@@ -219,13 +220,6 @@ module "backup_efs_lambda" {
         aws_s3_bucket.backup.arn,
         "${aws_s3_bucket.backup.arn}/*"
       ]
-    },
-    {
-      # switch_slot 用: 現在アクティブなスロット名を記録する SSM パラメータ 1 個のみに限定
-      Sid      = "ActiveSlotParam"
-      Effect   = "Allow"
-      Action   = ["ssm:GetParameter", "ssm:PutParameter"]
-      Resource = "arn:aws:ssm:${var.aws_region}:${local.account_id}:parameter${local.ssm_prefix}/active_slot"
     }
   ]
 

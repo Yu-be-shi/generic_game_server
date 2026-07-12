@@ -4,22 +4,22 @@ bf_switch_slot.py - switch_slot アクション（Palworld セーブデータ専
 【スロット切り替えモード（switch_slot・Palworld セーブデータ専用）】
   トリガー: aws lambda invoke による手動実行（Discord /switch-slot コマンドから非同期 invoke）
   処理:
-    1. SSM（ACTIVE_SLOT_PARAM）から現在のスロット名を取得（未設定なら "default"）
+    1. S3（ACTIVE_SLOT_KEY オブジェクト）から現在のスロット名を取得（未設定なら "default"）
     2. 現在のワールドフォルダ（SaveGames/0/<GUID>/）の中身を S3 の
        <BACKUP_PREFIX>/slots/<現スロット>/ へ保存（保護）
     3. ワールドフォルダの中身を削除（フォルダ自体・GUID 名は残す）
     4. S3 の <BACKUP_PREFIX>/slots/<切替先スロット>/ にデータがあれば EFS へ書き戻す
        （無ければ空のまま → 次回起動時に新規ワールドとして生成される）
-    5. ACTIVE_SLOT_PARAM を切替先スロット名に更新
+    5. ACTIVE_SLOT_KEY を切替先スロット名で上書き
   EFS アクセスポイントや ECS タスク定義は一切変更しないため、terraform apply は不要。
+  ※ この Lambda は VPC 内（NAT なし）で動くため SSM/インターネットに到達できない。
+    アクティブスロットの状態は SSM ではなく S3 オブジェクトで管理する。
   イベント例:
     { "action": "switch_slot", "slot": "world2" }
 """
 
-from ssm_params import ssm_get, ssm_put
-
 from bf_config import (
-    ACTIVE_SLOT_PARAM,
+    ACTIVE_SLOT_KEY,
     BACKUP_BUCKET,
     BACKUP_PREFIX,
     DEFAULT_SLOT,
@@ -27,7 +27,7 @@ from bf_config import (
     SAVEGAMES_REL,
     SLOT_NAME_RE,
     logger,
-    ssm,
+    s3,
 )
 from bf_palworld import _prepare_world_dir
 from bf_storage import _mirror_from_s3
@@ -42,14 +42,14 @@ def switch_slot_handler(event, context):
     EFS アクセスポイント・ECS タスク定義は一切変更しないため terraform apply は不要。
 
     処理:
-      1. 現在アクティブなスロット名を SSM から取得（未設定なら DEFAULT_SLOT）
+      1. 現在アクティブなスロット名を S3（ACTIVE_SLOT_KEY）から取得（未設定なら DEFAULT_SLOT）
       2. 現在のワールドフォルダの中身を S3 の <BACKUP_PREFIX>/slots/<現スロット>/ へ保存（保護）
       3. ワールドフォルダの中身を削除（フォルダ自体・GUID 名は残す。
          サーバーはフォルダ名でワールドを参照するため、名前を変えないことで
          GameUserSettings.ini の編集が不要になる ―― restore_handler と同じ設計）
       4. S3 の <BACKUP_PREFIX>/slots/<切替先スロット>/ にデータがあれば EFS へ書き戻す
          （無ければ空のまま → 次回起動時に新規ワールドとして生成される）
-      5. SSM の ACTIVE_SLOT_PARAM を切替先スロット名に更新
+      5. S3 の ACTIVE_SLOT_KEY を切替先スロット名で上書き
     """
     new_slot = event.get("slot")
     if not new_slot:
@@ -100,14 +100,14 @@ def switch_slot_handler(event, context):
 
 
 def _get_active_slot() -> str:
-    """SSM から現在アクティブなスロット名を取得する。未設定・未構成時は DEFAULT_SLOT を返す。"""
-    if not ACTIVE_SLOT_PARAM:
+    """S3 から現在アクティブなスロット名を取得する。オブジェクト未作成時は DEFAULT_SLOT を返す。"""
+    try:
+        body = s3.get_object(Bucket=BACKUP_BUCKET, Key=ACTIVE_SLOT_KEY)["Body"]
+        return body.read().decode("utf-8").strip() or DEFAULT_SLOT
+    except s3.exceptions.NoSuchKey:
         return DEFAULT_SLOT
-    return ssm_get(ssm, ACTIVE_SLOT_PARAM, default=DEFAULT_SLOT)
 
 
 def _set_active_slot(slot: str):
-    """SSM のアクティブスロットパラメータを更新する。ACTIVE_SLOT_PARAM 未設定時は何もしない。"""
-    if not ACTIVE_SLOT_PARAM:
-        return
-    ssm_put(ssm, ACTIVE_SLOT_PARAM, slot)
+    """S3 のアクティブスロットオブジェクトを切替先スロット名で上書きする。"""
+    s3.put_object(Bucket=BACKUP_BUCKET, Key=ACTIVE_SLOT_KEY, Body=slot.encode("utf-8"))

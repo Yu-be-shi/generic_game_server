@@ -19,8 +19,11 @@ logger.setLevel(logging.INFO)
 # 環境変数（Terraform から注入）
 BACKUP_BUCKET = os.environ["BACKUP_BUCKET"]
 BACKUP_PREFIX = os.environ["BACKUP_PREFIX"]
-# switch_slot 専用。空文字列の場合はスロット切り替え機能を使わない前提（既存デプロイ後方互換）
-ACTIVE_SLOT_PARAM = os.environ.get("ACTIVE_SLOT_PARAM", "")
+
+# switch_slot 専用: 現在アクティブなスロット名を記録する S3 オブジェクトのキー。
+# この Lambda は VPC 内（NAT なし・S3 Gateway エンドポイントのみ）で動くため
+# SSM には到達できない。状態は S3 に置く。
+ACTIVE_SLOT_KEY = f"{BACKUP_PREFIX}/slots/_active_slot"
 
 # EFS マウントパス（file_system_config.local_mount_path と一致させる）
 EFS_MOUNT_PATH = pathlib.Path("/mnt/efs")
@@ -38,4 +41,3 @@ DEFAULT_SLOT = "default"
 SLOT_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 s3 = boto3.client("s3")
-ssm = boto3.client("ssm")
