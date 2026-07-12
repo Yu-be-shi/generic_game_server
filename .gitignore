@@ -45,3 +45,6 @@ docs/architecture/.venv/
 .idea/
 .vscode/
 *.swp
+
+# マップ移植作業用の一時データ（フレンドのセーブファイル・コミット禁止）
+mapdata*/
