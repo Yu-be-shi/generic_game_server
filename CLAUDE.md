@@ -63,7 +63,7 @@ EventBridge ルール:
   AWS Budgets → SNS → notify_cost Lambda → Discord webhook（+ 失敗時の SQS DLQ）
 ```
 
-すべてのリソース名は `${game_name}-${workspace}-` でプレフィックスされる（例：`palworld-palworld-cluster`）。
+すべてのリソース名は `${game_name}-${workspace}-` でプレフィックスされる。ただし game_name と workspace が同名の場合は重複を避けて縮約される（例：game_name=palworld, workspace=palworld → `palworld-cluster`。workspace=palworld2 なら `palworld-palworld2-cluster`）。
 
 ## ECS クラスタータグ（サービスディスカバリ）
 
@@ -78,7 +78,7 @@ EventBridge ルール:
 
 ## SSM パラメータ名前空間
 
-すべてのゲームステータスパラメータは `/ggs/<name_prefix>/` 以下に存在する（例：`/ggs/palworld-palworld/`）：
+すべてのゲームステータスパラメータは `/ggs/<name_prefix>/` 以下に存在する（例：`/ggs/palworld/`）：
 
 | パラメータ | 書き込み元 | 読み取り元 | 用途 |
 |-----------|--------|--------|---------|
@@ -159,7 +159,7 @@ terraform apply -var-file=../games/<game>.tfvars
 #    a) ECS Exec や一時タスクで EFS マウント済みのコンテナを起動
 #    b) aws s3 sync s3://<backup-bucket>/<prefix>/ <efs-mount-path>/ --region ap-northeast-1
 #    例（一時的な復元タスク起動、EFS がマウントされているコンテナ内で実行）:
-aws s3 sync s3://palworld-palworld-backup/palworld-palworld/ /palworld/ --region ap-northeast-1
+aws s3 sync s3://palworld-backup-<account_id>/palworld/ /palworld/ --region ap-northeast-1
 
 # 3. 以降は通常どおり Discord /start でゲームサーバーを起動
 ```
@@ -168,28 +168,28 @@ aws s3 sync s3://palworld-palworld-backup/palworld-palworld/ /palworld/ --region
 
 ```bash
 # 起動
-aws ecs update-service --cluster palworld-palworld-cluster \
-  --service palworld-palworld-service --desired-count 1 --region ap-northeast-1
+aws ecs update-service --cluster palworld-cluster \
+  --service palworld-service --desired-count 1 --region ap-northeast-1
 
 # 停止
-aws ecs update-service --cluster palworld-palworld-cluster \
-  --service palworld-palworld-service --desired-count 0 --region ap-northeast-1
+aws ecs update-service --cluster palworld-cluster \
+  --service palworld-service --desired-count 0 --region ap-northeast-1
 
 # 状態確認
-aws ecs describe-services --cluster palworld-palworld-cluster \
-  --services palworld-palworld-service --region ap-northeast-1 \
+aws ecs describe-services --cluster palworld-cluster \
+  --services palworld-service --region ap-northeast-1 \
   --query "services[0].{Status:status,Running:runningCount,Desired:desiredCount}"
 
 # ゲームサーバー + モニターのログをストリーミング
-aws logs tail /ecs/palworld-palworld --follow --region ap-northeast-1
+aws logs tail /ecs/palworld --follow --region ap-northeast-1
 
 # Lambda ログをストリーミング
 aws logs tail /aws/lambda/game-server-discord-control --follow --region ap-northeast-1
-aws logs tail /aws/lambda/palworld-palworld-notify-ip --follow --region ap-northeast-1
-aws logs tail /aws/lambda/palworld-palworld-auto-update --follow --region ap-northeast-1
+aws logs tail /aws/lambda/palworld-notify-ip --follow --region ap-northeast-1
+aws logs tail /aws/lambda/palworld-auto-update --follow --region ap-northeast-1
 
 # SSM ステータスパラメータを読む
-aws ssm get-parameters-by-path --path /ggs/palworld-palworld --region ap-northeast-1
+aws ssm get-parameters-by-path --path /ggs/palworld --region ap-northeast-1
 ```
 
 ### コスト通知の疎通テスト
@@ -199,14 +199,14 @@ AWS Budgets の実際のしきい値到達を待たずに、SNS → Lambda(`noti
 ```bash
 # 疎通テスト送信（Discord/Slack にテストメッセージが届けば経路は正常）
 aws sns publish \
-  --topic-arn arn:aws:sns:ap-northeast-1:<account_id>:palworld-palworld-cost-alert \
+  --topic-arn arn:aws:sns:ap-northeast-1:<account_id>:palworld-cost-alert \
   --subject "コスト通知 疎通テスト" \
   --message "これはテストです。Discord に届けば SNS→Lambda→webhook は正常です。" \
   --region ap-northeast-1
 
 # DLQ 確認（Lambda 障害時のメッセージ蓄積を確認）
 aws sqs get-queue-attributes \
-  --queue-url $(aws sqs get-queue-url --queue-name palworld-palworld-notify-cost-dlq --region ap-northeast-1 --query QueueUrl --output text) \
+  --queue-url $(aws sqs get-queue-url --queue-name palworld-notify-cost-dlq --region ap-northeast-1 --query QueueUrl --output text) \
   --attribute-names ApproximateNumberOfMessages \
   --region ap-northeast-1
 ```
