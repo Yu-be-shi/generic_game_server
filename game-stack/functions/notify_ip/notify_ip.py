@@ -30,6 +30,8 @@ logger.setLevel(logging.INFO)
 GAME_NAME   = os.environ["GAME_NAME"]
 CLUSTER_ARN = os.environ.get("CLUSTER_ARN", "")
 READY_PARAM = os.environ.get("READY_PARAM", "")
+# ゲームの接続ポート（game_ports の先頭）。未設定なら IP のみ通知（後方互換）
+GAME_PORT   = os.environ.get("GAME_PORT", "")
 # 最後に通知したタスク ARN を記録するパラメータ名（同一タスクへの重複通知を排除）。
 # NOTIFIED_PARAM が未設定（terraform apply 前の後方互換）の場合のみ、
 # READY_PARAM からの文字列置換にフォールバックする。
@@ -110,9 +112,11 @@ def _handle_ssm_ready_event(detail):
             logger.info("同一 task_arn のためスキップ: %s", task_arn)
             return
 
+    # ゲームクライアントにそのまま貼れるよう IP:ポート を 1 つのコード片にする
+    address = f"{public_ip}:{GAME_PORT}" if GAME_PORT else public_ip
     message = (
         f"🟢 **{GAME_NAME}** サーバーが接続可能になりました！\n"
-        f"IP アドレス: `{public_ip}`"
+        f"接続先: `{address}`"
     )
     if not send_message_safe(message):
         return

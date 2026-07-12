@@ -31,6 +31,8 @@ module "notify_ip_lambda" {
     CLUSTER_ARN    = aws_ecs_cluster.game.arn
     READY_PARAM    = "${local.ssm_prefix}/ready"
     NOTIFIED_PARAM = "${local.ssm_prefix}/notified_task"
+    # 起動通知に載せる接続ポート（game_ports の先頭 = クライアントの接続先ポート）
+    GAME_PORT      = tostring(var.game_ports[0].port)
   })
 
   extra_iam_statements = [
