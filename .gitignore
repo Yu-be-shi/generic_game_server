@@ -14,7 +14,8 @@
 
 # --- 変数ファイル（discord_webhook_url 等の機密情報を含む）---
 games/*.tfvars
-!games/example.tfvars   # example のみコミット対象
+# example のみコミット対象（.gitignore は行末コメント不可のため別行に書く）
+!games/example.tfvars
 
 # --- Lambda ZIP ファイル（archive_file が自動生成するため不要）---
 **/functions/**/*.zip
