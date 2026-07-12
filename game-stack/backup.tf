@@ -84,6 +84,20 @@ resource "aws_s3_bucket_lifecycle_configuration" "backup" {
   }
 
   rule {
+    id     = "expire-notification-events"
+    status = "Enabled"
+
+    # 通知用の結果イベント JSON（notify_backup.tf 参照）は通知後に用済みのため短期削除
+    filter {
+      prefix = "${local.backup_prefix}/_events/"
+    }
+
+    expiration {
+      days = 7
+    }
+  }
+
+  rule {
     id     = "tiering"
     status = "Enabled"
 

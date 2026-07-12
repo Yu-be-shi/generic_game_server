@@ -239,7 +239,7 @@ terraform apply -var-file=../games/palworld.tfvars
 - **`/backup game:<name>`** — 今すぐ EFS→S3 のバックアップを実行（`action=backup`）。ファイルを読むだけなのでサーバー起動中でも実行可。
 - **`/restore game:<name>`** — S3→EFS へ丸ごとミラーリング（`action=restore_all`）。破壊的操作のため **サーバー起動中は拒否**される。実行前に現在の EFS 内容を自動的に S3 の `_pre_restore_snapshot/<exec_id>/` へ退避してから上書きする。S3 に存在しないファイルの削除は行わない（追加・上書きのみの安全側動作）。
 
-どちらも `InvocationType="Event"`（非同期）で呼び出すため、Discord には「開始しました」とだけ返り、完了通知は届かない（結果は CloudWatch Logs `/aws/lambda/<name_prefix>-backup-efs` を参照）。コストは Lambda 実行時間分のみで、無料枠内に収まる想定（実行数秒〜数十秒）。
+どちらも `InvocationType="Event"`（非同期）で呼び出すため、Discord には「開始しました」とすぐ返る。完了・失敗の結果は、backup_efs Lambda が S3 の `<backup_prefix>/_events/` に書いた結果 JSON を S3 イベント通知経由で `notify_backup` Lambda（VPC 外）が拾い、Discord webhook へ通知する（VPC 内の backup_efs からは webhook に直接届かないため。`notify_backup.tf` 参照）。コストは Lambda 実行時間分のみで、無料枠内に収まる想定（実行数秒〜数十秒）。
 
 ## Discord だけでのセーブデータ切り替え（`/switch-slot`）
 

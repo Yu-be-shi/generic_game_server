@@ -1,6 +1,6 @@
 """restore.py - /restore game:<name>: S3 の最新バックアップを EFS へミラーリングする"""
 from commands.guards import guarded_worker_invoke
-from constants import CLOUDWATCH_LOGS_REFERENCE, TAG_BACKUP_FUNCTION, WORKER_INVOKE_FAILURE_FOOTER
+from constants import TAG_BACKUP_FUNCTION, WORKER_INVOKE_FAILURE_FOOTER
 
 
 def cmd_restore(game_name: str) -> str:
@@ -27,7 +27,6 @@ def cmd_restore(game_name: str) -> str:
         success_message=(
             f"♻️ **{game_name}** の復元（S3→EFS）を開始しました。\n"
             "実行前の内容は自動的に S3 の `_pre_restore_snapshot/` へ退避済みです。\n"
-            "完了通知は届きません。"
-            + CLOUDWATCH_LOGS_REFERENCE
+            "完了または失敗すると通知が届きます。"
         ),
     )

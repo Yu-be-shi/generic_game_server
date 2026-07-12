@@ -1,6 +1,6 @@
 """switch_slot.py - /switch-slot game:<name> slot:<name>: セーブデータのスロットを切り替える"""
 from commands.guards import guarded_worker_invoke
-from constants import CLOUDWATCH_LOGS_REFERENCE, TAG_BACKUP_FUNCTION, WORKER_INVOKE_FAILURE_FOOTER
+from constants import TAG_BACKUP_FUNCTION, WORKER_INVOKE_FAILURE_FOOTER
 
 
 def cmd_switch_slot(game_name: str, slot: str) -> str:
@@ -34,7 +34,6 @@ def cmd_switch_slot(game_name: str, slot: str) -> str:
         success_message=(
             f"🔀 **{game_name}** のセーブデータを `{slot}` へ切り替え中です。\n"
             "切り替え前の内容は自動的に S3 の `slots/` 配下へ保存されています。\n"
-            "完了通知は届きません。"
-            + CLOUDWATCH_LOGS_REFERENCE
+            "完了または失敗すると通知が届きます（通常数秒〜数十秒）。"
         ),
     )
