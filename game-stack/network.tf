@@ -49,8 +49,10 @@ data "aws_subnet" "efs_primary" {
 
 locals {
   # terraform workspace でゲームごとに state を分離（A方式の核心）
-  # 例: game_name=palworld, workspace=palworld → prefix=palworld-palworld
-  name_prefix  = "${var.game_name}-${terraform.workspace}"
+  # game_name と workspace が同名の場合は重複を避けて縮約する
+  # 例: game_name=palworld, workspace=palworld  → prefix=palworld
+  #     game_name=palworld, workspace=palworld2 → prefix=palworld-palworld2
+  name_prefix = var.game_name == terraform.workspace ? var.game_name : "${var.game_name}-${terraform.workspace}"
   cluster_name = "${local.name_prefix}-cluster"
   service_name = "${local.name_prefix}-service"
 
