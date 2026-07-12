@@ -28,7 +28,10 @@ module "notify_backup_lambda" {
   handler          = "notify_backup.lambda_handler"
   timeout          = 30
 
-  environment_variables = local.messaging_env
+  environment_variables = merge(local.messaging_env, {
+    # switch_slot 完了時にアクティブスロット名をミラーする（/status 表示・同一スロットガード用）
+    ACTIVE_SLOT_PARAM = "${local.ssm_prefix}/active_slot"
+  })
 
   extra_iam_statements = [
     {
@@ -37,6 +40,13 @@ module "notify_backup_lambda" {
       Effect   = "Allow"
       Action   = ["s3:GetObject"]
       Resource = "${aws_s3_bucket.backup.arn}/${local.backup_prefix}/_events/*"
+    },
+    {
+      # アクティブスロットの SSM ミラー書き込み（1 パラメータ限定）
+      Sid      = "MirrorActiveSlot"
+      Effect   = "Allow"
+      Action   = ["ssm:PutParameter"]
+      Resource = "arn:aws:ssm:${var.aws_region}:${local.account_id}:parameter${local.ssm_prefix}/active_slot"
     }
   ]
 }

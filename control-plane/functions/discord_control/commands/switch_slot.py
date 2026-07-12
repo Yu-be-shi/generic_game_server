@@ -1,6 +1,7 @@
 """switch_slot.py - /switch-slot game:<name> slot:<name>: セーブデータのスロットを切り替える"""
-from commands.guards import guarded_worker_invoke
-from constants import TAG_BACKUP_FUNCTION, WORKER_INVOKE_FAILURE_FOOTER
+import ecs_helpers
+from commands.guards import guarded_worker_invoke, require_service
+from constants import TAG_BACKUP_FUNCTION, TAG_STATUS_PARAM_PREFIX, WORKER_INVOKE_FAILURE_FOOTER
 
 
 def cmd_switch_slot(game_name: str, slot: str) -> str:
@@ -17,6 +18,19 @@ def cmd_switch_slot(game_name: str, slot: str) -> str:
       - 切り替え前に現在のスロットの内容を自動的に S3 の slots/<現スロット>/ へ保存する
       - 切り替え先スロットが未使用の場合は空のワールドとして起動する（新規ワールド扱い）
     """
+    # 同一スロットへの切り替えは「現ワールドを保存して同じものを書き戻す」だけの
+    # 無意味な往復になる（S3 側のスロットデータを手動更新していた場合は上書きで失う）
+    # ため、実行前に拒否する。active_slot 未記録（一度も切り替えていない）場合は判定しない。
+    cluster_arn, _, err = require_service(game_name)
+    if err:
+        return err
+    ssm_prefix = ecs_helpers.get_cluster_tag(cluster_arn, TAG_STATUS_PARAM_PREFIX)
+    if ssm_prefix and ecs_helpers.get_active_slot(ssm_prefix) == slot:
+        return (
+            f"ℹ️ `{slot}` はすでに使用中のスロットです。切り替えの必要はありません。\n"
+            f"現在のスロットは `/status game:{game_name}` で確認できます。"
+        )
+
     return guarded_worker_invoke(
         game_name,
         tag_key=TAG_BACKUP_FUNCTION,

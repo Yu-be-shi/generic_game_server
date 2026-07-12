@@ -7,7 +7,13 @@ import logging
 from datetime import datetime, timezone
 
 from clients import ec2, ecs, ssm
-from constants import SSM_SUFFIX_NOTIFIED_TASK, SSM_SUFFIX_PLAYERS, SSM_SUFFIX_READY, TAG_GAME
+from constants import (
+    SSM_SUFFIX_ACTIVE_SLOT,
+    SSM_SUFFIX_NOTIFIED_TASK,
+    SSM_SUFFIX_PLAYERS,
+    SSM_SUFFIX_READY,
+    TAG_GAME,
+)
 from ecs_net import get_running_task_public_ip
 from ssm_params import ssm_get, ssm_get_parameter
 
@@ -239,5 +245,20 @@ def get_notified_task(prefix: str):
     """
     try:
         return ssm_get(ssm, f"{prefix}{SSM_SUFFIX_NOTIFIED_TASK}")
+    except Exception:
+        return None
+
+
+def get_active_slot(prefix: str):
+    """
+    現在使用中のセーブデータスロット名を SSM から読む。
+
+    正本は S3 の slots/_active_slot オブジェクト（backup_efs Lambda が管理）だが、
+    control-plane からは S3 バケットが見えないため、switch_slot 完了時に
+    notify_backup Lambda が /ggs/<prefix>/active_slot へミラーした値を読む。
+    未記録（一度も /switch-slot を実行していない・ミラー失敗）の場合は None を返す。
+    """
+    try:
+        return ssm_get(ssm, f"{prefix}{SSM_SUFFIX_ACTIVE_SLOT}")
     except Exception:
         return None

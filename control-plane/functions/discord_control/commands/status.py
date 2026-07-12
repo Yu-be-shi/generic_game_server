@@ -28,9 +28,16 @@ def cmd_status(game_name: str) -> str:
     desired = svc.get("desiredCount", 0)
     running = svc.get("runningCount", 0)
 
+    # クラスターの StatusParamPrefix タグが SSM パラメータのプレフィックスを示す
+    ssm_prefix = ecs_helpers.get_cluster_tag(cluster_arn, TAG_STATUS_PARAM_PREFIX)
+
+    # 使用中のセーブデータスロット（/switch-slot 未実行なら未記録 = 既定スロット）
+    active_slot = ecs_helpers.get_active_slot(ssm_prefix) if ssm_prefix else None
+    slot_line = f"\n使用中スロット: `{active_slot or 'default'}`"
+
     if desired == 0:
         return (
-            f"⚫ **{game_name}** は停止中です。\n"
+            f"⚫ **{game_name}** は停止中です。{slot_line}\n"
             f"`/start game:{game_name}` で起動できます。"
         )
 
@@ -42,8 +49,6 @@ def cmd_status(game_name: str) -> str:
     ip_str = f"`{public_ip}`" if public_ip else "取得中..."
 
     # SSM からゲームサーバーの実起動状態・プレイヤー数を取得
-    # クラスターの StatusParamPrefix タグが SSM パラメータのプレフィックスを示す
-    ssm_prefix = ecs_helpers.get_cluster_tag(cluster_arn, TAG_STATUS_PARAM_PREFIX)
     if ssm_prefix:
         ready, players, ready_age = ecs_helpers.get_ssm_status(ssm_prefix)
         notified = ecs_helpers.get_notified_task(ssm_prefix)
@@ -64,7 +69,7 @@ def cmd_status(game_name: str) -> str:
                 player_str = ""
             return (
                 f"🟢 **{game_name}** 稼働中{player_str}\n"
-                f"IP アドレス: {ip_str}"
+                f"IP アドレス: {ip_str}{slot_line}"
             )
         else:
             return (

@@ -88,6 +88,7 @@ EventBridge ルール:
 | `maintenance` | auto_update Lambda | `/start`、`/update` | アップデート中の起動ブロック（0/1）|
 | `installed_buildid` | auto_update Lambda（アップデート成功時）| auto_update Lambda | インストール済み Steam ビルド ID |
 | `update_ready` | モニターサイドカー（アップデートタスクのみ）| auto_update Lambda | アップデートタスク完了シグナル |
+| `active_slot` | notify_backup Lambda（switch_slot 完了時のミラー）| `/status`、`/switch-slot` の同一スロットガード | 使用中のセーブデータスロット名（正本は S3 の `slots/_active_slot`）|
 
 ## Lambda パッケージング
 

@@ -17,6 +17,7 @@ SSM_SUFFIX_READY = "/ready"
 SSM_SUFFIX_PLAYERS = "/players"
 SSM_SUFFIX_MAINTENANCE = "/maintenance"
 SSM_SUFFIX_NOTIFIED_TASK = "/notified_task"
+SSM_SUFFIX_ACTIVE_SLOT = "/active_slot"
 
 # --- worker 系コマンド（/update・/backup・/restore・/switch-slot）の定型メッセージ断片 ---
 GAME_NAME_REQUIRED = "ゲーム名を指定してください。"
