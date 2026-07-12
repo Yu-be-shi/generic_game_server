@@ -20,8 +20,10 @@ SSM 経由で検知したら stop_task で停止する。
 
 【Steam バージョン事前チェック（STEAM_APP_ID 設定時のみ）】
   run_task の前に steamcmd.net の公開 API で最新 buildid を取得し、
-  SSM の installed_buildid（monitor が appmanifest から保存）と比較する。
+  SSM の installed_buildid（前回のアップデート成功時にこの Lambda 自身が保存）と比較する。
   一致（最新）→ コンテナを起動せず数秒で完了。不一致または判定不能 → 従来どおり run_task（fail-open）。
+  アップデート成功時は取得済みの最新 buildid を installed_buildid として保存する
+  （コンテナ内の appmanifest はイメージのアップデート処理が EFS に残さないため参照しない）。
 
 【トリガー】
   discord_control Lambda から InvocationType="Event"（非同期）で呼ばれる。
@@ -61,7 +63,7 @@ READY_PARAM          = f"/ggs/{NAME_PREFIX}/ready"
 UPDATE_READY_PARAM   = f"/ggs/{NAME_PREFIX}/update_ready"    # このパスには EventBridge ルール無し
 UPDATE_PLAYERS_PARAM = f"/ggs/{NAME_PREFIX}/update_players"
 MAINT_PARAM          = f"/ggs/{NAME_PREFIX}/maintenance"
-INSTALLED_BUILDID_PARAM = f"/ggs/{NAME_PREFIX}/installed_buildid"  # monitor が appmanifest から書込む
+INSTALLED_BUILDID_PARAM = f"/ggs/{NAME_PREFIX}/installed_buildid"  # アップデート成功時にこの Lambda が書込む
 
 # monitor に渡すダミーサービス名（実在しないため do_shutdown が実サービスを止めない）
 DUMMY_SERVICE_NAME = f"{NAME_PREFIX}-auto-update-noop"
@@ -101,7 +103,9 @@ def lambda_handler(event, context):
 
     # 2. Steam バージョン事前チェック（STEAM_APP_ID 設定時のみ）
     #    コンテナ起動前に Lambda から直接照合 → 最新なら数秒で完了（コンテナ不要）
-    skip_result = _is_up_to_date()
+    #    latest_buildid は成功時に installed_buildid として保存するため保持しておく
+    latest_buildid = _latest_steam_buildid() if STEAM_APP_ID else None
+    skip_result = _is_up_to_date(latest_buildid)
     if skip_result:
         return skip_result
 
@@ -133,6 +137,13 @@ def lambda_handler(event, context):
 
     # 8. 完了通知
     if success:
+        # 次回 /update の事前チェック用に、今回適用した buildid を記録する。
+        # steamcmd が実際に入れたビルドとズレる可能性があるのは「ポーリング中に
+        # 新ビルドが公開された」場合のみで、その場合も記録値 < 実体となり
+        # 次回チェックが不一致 → 再実行という安全側に倒れる。
+        if latest_buildid:
+            ssm_put_safe(ssm, INSTALLED_BUILDID_PARAM, latest_buildid)
+            logger.info("installed_buildid=%s を SSM に保存", latest_buildid)
         send_message_safe(
             f"✅ **{GAME_NAME}** のサーバーアップデートが完了しました！\n"
             f"`/start game:{GAME_NAME}` で起動できます。"
@@ -150,10 +161,11 @@ def lambda_handler(event, context):
 # 内部関数
 # ---------------------------------------------------------------
 
-def _is_up_to_date():
+def _is_up_to_date(latest):
     """
     Steam バージョン事前チェック（STEAM_APP_ID 設定時のみ）。
 
+    latest には呼び出し元が取得済みの最新 buildid（または None）を渡す。
     最新バージョンと確認できた場合はスキップ用のレスポンス dict
     （lambda_handler がそのまま return する）を返す。
     チェック対象外（STEAM_APP_ID 未設定）・判定不能・要アップデートの場合は None を返す。
@@ -161,7 +173,6 @@ def _is_up_to_date():
     if not STEAM_APP_ID:
         return None
 
-    latest    = _latest_steam_buildid()
     installed = _installed_buildid()
     if latest and installed and latest == installed:
         msg = (
@@ -368,15 +379,15 @@ def _latest_steam_buildid() -> "str | None":
 
 def _installed_buildid() -> "str | None":
     """
-    SSM から monitor が保存した installed buildid を取得する。
+    SSM から installed buildid を取得する。
 
-    monitor の write_buildid() が appmanifest_<appid>.acf から読んで保存する。
-    未保存（初回/manifest 未検出）の場合は None を返す（fail-open: アップデートを実行）。
+    前回のアップデート成功時に lambda_handler が保存した値。
+    未保存（初回 /update 前）の場合は None を返す（fail-open: アップデートを実行）。
     """
     try:
         value = ssm_get(ssm, INSTALLED_BUILDID_PARAM)
         if value is None:
-            logger.info("installed_buildid 未保存（初回 install 前、またはマニフェスト未検出）")
+            logger.info("installed_buildid 未保存（初回 /update 前）")
             return None
         logger.info("SSM installed_buildid=%s", value)
         return value or None

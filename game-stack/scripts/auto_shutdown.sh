@@ -93,8 +93,7 @@ ssm_put() {
 
 # ------------------------------------------------------------------
 # _efs_available: EFS_MOUNT_PATH が設定済み・マウント済みかを判定する
-# write_buildid / do_shutdown の両方が同じガードを必要とする
-# （未設定のまま find/s3 sync を実行するとルート全体を対象にする危険があるため）。
+# （未設定のまま s3 sync を実行するとルート全体を対象にする危険があるため）。
 # 戻り値: 0=利用可 / 1=利用不可（呼び出し元が警告ログとスキップを行う）
 # ------------------------------------------------------------------
 _efs_available() {
@@ -338,54 +337,6 @@ write_players() {
 }
 
 # ------------------------------------------------------------------
-# write_buildid: インストール済み Steam buildid を SSM に保存
-# STEAM_APP_ID が設定されている場合のみ実行（非 Steam 系はスキップ）
-# appmanifest_<appid>.acf を EFS から探して buildid を抽出し
-# BUILDID_PARAM に書き込む。不在・抽出失敗は警告のみ（fail-open）。
-# ------------------------------------------------------------------
-write_buildid() {
-    [ -z "${STEAM_APP_ID:-}" ]  && return 0
-    [ -z "${BUILDID_PARAM:-}" ] && return 0
-
-    # EFS_MOUNT_PATH が未設定またはマウントされていない場合は安全のためスキップ
-    # （未設定のまま find を実行すると find / でルート全探索になる危険がある）
-    if ! _efs_available; then
-        log "警告: write_buildid スキップ: EFS_MOUNT_PATH が未設定またはディレクトリが存在しません (${EFS_MOUNT_PATH:-<未設定>})"
-        return 0
-    fi
-
-    local manifest
-    manifest=$(find "${EFS_MOUNT_PATH}" \
-        -name "appmanifest_${STEAM_APP_ID}.acf" 2>/dev/null | head -n1)
-
-    if [ -z "${manifest}" ]; then
-        log "buildid スキップ: appmanifest_${STEAM_APP_ID}.acf が見つかりません（初回 install 前？）"
-        return 0
-    fi
-
-    local buildid
-    buildid=$(python3 - "${manifest}" << 'PYEOF'
-import re, sys
-try:
-    content = open(sys.argv[1]).read()
-    m = re.search(r'"buildid"\s+"(\d+)"', content)
-    print(m.group(1) if m else "", end="")
-except Exception:
-    print("", end="")
-PYEOF
-)
-
-    if [ -z "${buildid}" ]; then
-        log "警告: appmanifest_${STEAM_APP_ID}.acf から buildid を抽出できませんでした"
-        return 0
-    fi
-
-    log "installed_buildid=${buildid} を SSM ${BUILDID_PARAM} に書き込みます"
-    ssm_put "${BUILDID_PARAM}" "${buildid}" \
-        || log "警告: buildid の SSM 書き込みに失敗しました（IAM 権限を確認）"
-}
-
-# ------------------------------------------------------------------
 # backup_efs_to_s3: 停止前に EFS の内容を S3 へ同期する
 # BACKUP_BUCKET 未設定・EFS 未マウントの場合は安全のためスキップする（fail-open）。
 # ------------------------------------------------------------------
@@ -457,9 +408,6 @@ while true; do
     if [ "${_ready}" = "1" ]; then
         log "ゲームサーバーの受付開始を検知！（起動から約 ${startup_elapsed} 秒）"
         _server_ready=1
-        # Steam 系ゲームの場合: appmanifest から installed buildid を読んで SSM に保存する。
-        # ready=1 より先に書くことで、Worker Lambda が stop_task する前に確実に永続化される。
-        write_buildid
         if [ -n "${READY_PARAM:-}" ]; then
             log "SSM へ ready=1 を書き込みます → Discord IP 通知が送信されます"
             ssm_put "${READY_PARAM}" "1" \

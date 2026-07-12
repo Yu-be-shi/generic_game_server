@@ -162,10 +162,6 @@ resource "aws_ecs_task_definition" "game" {
         # SSM ステータス連携（Discord 通知・/status コマンド用）
         { name = "READY_PARAM", value = "${local.ssm_prefix}/ready" },
         { name = "PLAYERS_PARAM", value = "${local.ssm_prefix}/players" },
-        # Steam バージョンチェック連携（steam_app_id 設定時のみ使用）
-        # monitor が appmanifest から buildid を読んで SSM に書き込む
-        { name = "STEAM_APP_ID", value = var.steam_app_id },
-        { name = "BUILDID_PARAM", value = "${local.ssm_prefix}/installed_buildid" },
       ]
 
       # セーブデータを読み取るために EFS をマウント（読み取り専用）

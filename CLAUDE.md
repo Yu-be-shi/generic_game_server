@@ -86,7 +86,7 @@ EventBridge ルール:
 | `players` | モニターサイドカー | `/status` | 現在のプレイヤー数 |
 | `notified_task` | notify_ip Lambda | `/status` | 通知済みタスク ARN（重複排除）|
 | `maintenance` | auto_update Lambda | `/start`、`/update` | アップデート中の起動ブロック（0/1）|
-| `installed_buildid` | モニターサイドカー（appmanifest から）| auto_update Lambda | インストール済み Steam ビルド ID |
+| `installed_buildid` | auto_update Lambda（アップデート成功時）| auto_update Lambda | インストール済み Steam ビルド ID |
 | `update_ready` | モニターサイドカー（アップデートタスクのみ）| auto_update Lambda | アップデートタスク完了シグナル |
 
 ## Lambda パッケージング
