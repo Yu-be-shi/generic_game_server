@@ -39,8 +39,15 @@ def restore_all_handler(event, context):
         snapshotted, BACKUP_BUCKET, snapshot_prefix,
     )
 
-    # 2. S3 → EFS ミラーリング（_pre_restore_snapshot 配下は除外）
-    exclude_prefix = f"{BACKUP_PREFIX}/_pre_restore_snapshot/"
+    # 2. S3 → EFS ミラーリング。EFS 由来でない管理用プレフィックスは除外する:
+    #    - _pre_restore_snapshot/: ロールバック退避（無限肥大化防止）
+    #    - slots/: /switch-slot のスロット保管領域（EFS に書き戻すとゴミになる）
+    #    - _events/: 通知用の結果イベント JSON
+    exclude_prefix = (
+        f"{BACKUP_PREFIX}/_pre_restore_snapshot/",
+        f"{BACKUP_PREFIX}/slots/",
+        f"{BACKUP_PREFIX}/_events/",
+    )
     downloaded, failed = _mirror_from_s3(
         f"{BACKUP_PREFIX}/", EFS_MOUNT_PATH, exclude_prefix=exclude_prefix
     )

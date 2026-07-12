@@ -62,7 +62,8 @@ def _mirror_from_s3(prefix: str, dest_root: pathlib.Path, exclude_prefix: str = 
     """
     S3 の prefix 配下（末尾 "/" 付き）を dest_root へミラーダウンロードする
     （restore_all・switch_slot の両方で使う汎用ヘルパー）。
-    exclude_prefix が指定されていれば、そのプレフィックスに一致するキーは除外する。
+    exclude_prefix が指定されていれば、そのプレフィックスに一致するキーは除外する
+    （str.startswith に渡すため、文字列 1 つでもタプルでもよい）。
     追加・上書きのみ行い、dest_root 側にしかないファイルの削除は行わない（安全側）。
 
     (downloaded, failed) のタプルを返す。
