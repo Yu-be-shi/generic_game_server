@@ -29,36 +29,42 @@ variable "docker_image" {
 variable "task_cpu" {
   description = <<-EOT
     Fargate タスクの CPU ユニット数（vCPU x 256）。
-    許容値: 256 (0.25vCPU) / 512 (0.5vCPU) / 1024 (1vCPU) / 2048 (2vCPU)
-    !! 高額誤デプロイ防止のため 2048 (2vCPU) を上限とする !!
-    CPU/Memory の有効な組み合わせ:
+    許容値: 256 (0.25vCPU) / 512 (0.5vCPU) / 1024 (1vCPU) / 2048 (2vCPU) / 4096 (4vCPU) / 8192 (8vCPU)
+    !! 高額誤デプロイ防止のため 8192 (8vCPU) を上限とする !!
+    （8192 は Palworld 公式推奨メモリ 32GB に必要な最小 vCPU。Fargate は 4vCPU だと最大 30GB）
+    CPU/Memory の有効な組み合わせ（Fargate の制約）:
       256  CPU → 512〜2048 MB
       512  CPU → 1024〜4096 MB
-      1024 CPU → 2048〜4096 MB
-      2048 CPU → 4096 MB (本構成上限)
+      1024 CPU → 2048〜8192 MB
+      2048 CPU → 4096〜16384 MB
+      4096 CPU → 8192〜30720 MB
+      8192 CPU → 16384〜61440 MB（本構成では 32768 MB まで）
   EOT
   type        = number
 
   validation {
-    condition     = contains([256, 512, 1024, 2048], var.task_cpu)
-    error_message = "task_cpu は 256, 512, 1024, 2048 のいずれかを指定してください。高額誤デプロイ防止のため 4096 以上は設定不可。"
+    condition     = contains([256, 512, 1024, 2048, 4096, 8192], var.task_cpu)
+    error_message = "task_cpu は 256, 512, 1024, 2048, 4096, 8192 のいずれかを指定してください。高額誤デプロイ防止のため 16384 以上は設定不可。"
   }
 }
 
 variable "task_memory" {
   description = <<-EOT
     Fargate タスクのメモリ (MiB)。
-    許容値: 512 / 1024 / 2048 / 3072 / 4096 / 8192 / 16384
+    許容値: 512 / 1024 / 2048 / 3072 / 4096 / 8192 / 16384 / 30720 / 32768
+    !! 高額誤デプロイ防止のため 32768 (32GB・Palworld 公式推奨) を上限とする !!
     ※ task_cpu との組み合わせ制約に注意（詳細は task_cpu の説明を参照）
-    コスト目安（ap-northeast-1・起動中のみ課金）:
-      4096 MB → ~$0.129/h（≒ ¥19/h）
-      8192 MB → ~$0.155/h（≒ ¥23/h）
+      30720 (30GB) = 4096 CPU の上限 / 32768 (32GB) には 8192 CPU が必要
+    コスト目安（ap-northeast-1・起動中のみ課金・CPU 分含む）:
+      2048 CPU + 16384 MB → ~$0.19/h（≒ ¥28/h）
+      4096 CPU + 30720 MB → ~$0.37/h（≒ ¥55/h）
+      8192 CPU + 32768 MB → ~$0.58/h（≒ ¥87/h）
   EOT
   type        = number
 
   validation {
-    condition     = contains([512, 1024, 2048, 3072, 4096, 8192, 16384], var.task_memory)
-    error_message = "task_memory は 512, 1024, 2048, 3072, 4096, 8192, 16384 のいずれかを指定してください。"
+    condition     = contains([512, 1024, 2048, 3072, 4096, 8192, 16384, 30720, 32768], var.task_memory)
+    error_message = "task_memory は 512, 1024, 2048, 3072, 4096, 8192, 16384, 30720, 32768 のいずれかを指定してください。"
   }
 }
 
