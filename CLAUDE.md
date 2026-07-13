@@ -61,6 +61,8 @@ EventBridge ルール:
 
 コストアラート:
   AWS Budgets → SNS → notify_cost Lambda → Discord webhook（+ 失敗時の SQS DLQ）
+  ※ コスト系通知（notify_cost・cost_guard）は AWS アカウント ID 等を含むため、
+    `admin_webhook_url` を設定すると管理者専用チャンネルへ分離できる（未設定なら一般チャンネル）
 ```
 
 すべてのリソース名は `${game_name}-${workspace}-` でプレフィックスされる。ただし game_name と workspace が同名の場合は重複を避けて縮約される（例：game_name=palworld, workspace=palworld → `palworld-cluster`。workspace=palworld2 なら `palworld-palworld2-cluster`）。

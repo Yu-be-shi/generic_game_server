@@ -44,7 +44,8 @@ module "cost_guard_lambda" {
   handler          = "cost_guard.lambda_handler"
   timeout          = 60
 
-  environment_variables = merge(local.messaging_env, {
+  # コストガードは運用者向け通知のため管理者向け webhook（admin_webhook_url）へ送信
+  environment_variables = merge(local.admin_messaging_env, {
     CLUSTER_ARN       = aws_ecs_cluster.game.arn
     SERVICE_NAME      = local.service_name
     MAX_RUNTIME_HOURS = tostring(var.max_task_runtime_hours)

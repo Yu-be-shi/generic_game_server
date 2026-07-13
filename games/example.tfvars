@@ -126,6 +126,11 @@ steam_branch = "public"  # 通常は変更不要
 # Discordサーバー設定 → 連携サービス → ウェブフック から取得
 discord_webhook_url = "https://discord.com/api/webhooks/XXXXXXXXXX/YYYYYYYYYYY"
 
+# 運用者向け通知（コストアラート・コストガード）の分離先 Webhook URL（オプション）
+# コスト通知には AWS アカウント ID が含まれるため、プレイヤーも見る一般チャンネルと
+# 分けたい場合に管理者専用チャンネルの Webhook を指定する。未設定なら上記 URL に送信
+# admin_webhook_url = "https://discord.com/api/webhooks/XXXXXXXXXX/ZZZZZZZZZZZ"
+
 # メッセージングプロバイダー（"discord" または "slack"。既定: "discord"）
 # messaging_provider = "discord"
 

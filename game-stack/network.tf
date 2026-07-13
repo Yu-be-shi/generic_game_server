@@ -73,10 +73,18 @@ locals {
   # one_zone: sort した先頭サブネット 1 つに固定（EFS マウントターゲットと同一 AZ が必須）
   efs_subnets = var.efs_storage_class == "one_zone" ? [sort(data.aws_subnets.public.ids)[0]] : data.aws_subnets.public.ids
 
-  # 複数 Lambda（notify_ip, notify_cost, cost_guard, auto_update）共通のメッセージング設定
+  # 一般向け通知 Lambda（notify_ip, notify_backup, auto_update）共通のメッセージング設定
   messaging_env = {
     MESSAGING_PROVIDER    = var.messaging_provider
     MESSAGING_WEBHOOK_URL = var.discord_webhook_url
+  }
+
+  # 運用者向け通知 Lambda（notify_cost, cost_guard）用のメッセージング設定。
+  # コスト通知には AWS アカウント ID 等が含まれるため管理者専用チャンネルへ分離できる。
+  # admin_webhook_url 未設定時は一般チャンネルへフォールバック（従来どおり）
+  admin_messaging_env = {
+    MESSAGING_PROVIDER    = var.messaging_provider
+    MESSAGING_WEBHOOK_URL = var.admin_webhook_url != "" ? var.admin_webhook_url : var.discord_webhook_url
   }
 }
 

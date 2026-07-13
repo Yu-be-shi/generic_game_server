@@ -239,6 +239,24 @@ variable "discord_webhook_url" {
   }
 }
 
+variable "admin_webhook_url" {
+  description = <<-EOT
+    運用者向け通知（コストアラート・コストガード）の送信先 Webhook URL（オプション）。
+    コスト通知には AWS アカウント ID 等の機密情報が含まれるため、
+    プレイヤーも見る一般チャンネルとは別の管理者専用チャンネルに分離できる。
+    空文字列（デフォルト）の場合は discord_webhook_url に送信する（従来どおり）。
+    IP 通知・バックアップ結果通知など一般向け通知は本設定に関わらず discord_webhook_url に送信される。
+  EOT
+  type        = string
+  default     = ""
+  sensitive   = true
+
+  validation {
+    condition     = var.admin_webhook_url == "" || can(regex("^https://", var.admin_webhook_url))
+    error_message = "admin_webhook_url は空文字列または https:// で始まる URL を指定してください。"
+  }
+}
+
 variable "messaging_provider" {
   description = "メッセージングプロバイダー。'discord' または 'slack'（既定: discord）。切り替え時は discord_webhook_url に対応ツールの Webhook URL を設定し、control-plane/functions/discord_control/provider.py も更新すること"
   type        = string

@@ -59,7 +59,8 @@ module "notify_cost_lambda" {
   # SNS 非同期 invoke がリトライ後も失敗した場合（webhook 403 等）のメッセージを保存
   dead_letter_target_arn = aws_sqs_queue.notify_cost_dlq.arn
 
-  environment_variables = local.messaging_env
+  # コスト通知はアカウント ID を含むため管理者向け webhook（admin_webhook_url）へ送信
+  environment_variables = local.admin_messaging_env
 
   extra_iam_statements = [
     {
