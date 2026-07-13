@@ -98,6 +98,12 @@ commands = [
                 "type": 3,
                 "required": True,
             },
+            {
+                "name": "new",
+                "description": "True で新規ワールドの作成を明示します（未保存のスロット名は既定で警告・中断）",
+                "type": 5,
+                "required": False,
+            },
         ],
     },
 ]

@@ -54,8 +54,10 @@ module "discord_control_lambda" {
   handler          = "index.lambda_handler"
 
   # Discord の3秒制限に十分な余裕を持たせる
-  # deferred ワーカー（自己 invoke）は重い AWS API 呼び出しを担うため余裕を持たせる
-  timeout = 10
+  # deferred ワーカー（自己 invoke）は重い AWS API 呼び出しを担うため余裕を持たせる。
+  # /switch-slot のスロット存在チェックは backup_efs（VPC 内）の同期 invoke を挟むため、
+  # そのコールドスタート数秒を見込んで 30 秒とする
+  timeout = 30
 
   # 実測 Max Memory Used: 110 MB / 128 MB（残り 18 MB）。OOM 余裕確保と
   # コールドスタート短縮（CPU 割当はメモリに比例）のため 256 MB に引き上げる。

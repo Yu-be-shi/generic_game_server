@@ -99,6 +99,26 @@ def switch_slot_handler(event, context):
     }
 
 
+def list_slots_handler(event, context):
+    """
+    S3 に保存済みのスロット名一覧と現在のアクティブスロットを返す（同期照会用）。
+
+    Discord /switch-slot の実行前チェック（存在しないスロット名の打ち間違い警告）から
+    RequestResponse で呼ばれる。<BACKUP_PREFIX>/slots/ 直下の「フォルダ」
+    （CommonPrefixes）のみを数えるため、_active_slot オブジェクトは含まれない。
+    """
+    prefix = f"{BACKUP_PREFIX}/slots/"
+    slots = []
+    paginator = s3.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=BACKUP_BUCKET, Prefix=prefix, Delimiter="/"):
+        for common in page.get("CommonPrefixes", []):
+            name = common["Prefix"][len(prefix):].rstrip("/")
+            if name:
+                slots.append(name)
+    logger.info("list_slots: %d 件 (%s)", len(slots), ", ".join(slots))
+    return {"action": "list_slots", "slots": slots, "active_slot": _get_active_slot()}
+
+
 def _get_active_slot() -> str:
     """S3 から現在アクティブなスロット名を取得する。オブジェクト未作成時は DEFAULT_SLOT を返す。"""
     try:

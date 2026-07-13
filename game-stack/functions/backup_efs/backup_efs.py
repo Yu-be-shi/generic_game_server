@@ -20,12 +20,18 @@ from bf_config import logger
 from bf_events import emit_event
 from bf_restore import restore_handler
 from bf_restore_all import restore_all_handler
-from bf_switch_slot import switch_slot_handler
+from bf_switch_slot import list_slots_handler, switch_slot_handler
 
 
 def lambda_handler(event, context):
     """Lambda エントリーポイント。実行結果を _events/ へ書き込み Discord 通知に繋げる。"""
     action = event.get("action", "backup")
+
+    # list_slots は Discord コマンドの実行前チェック用の同期照会（RequestResponse）。
+    # 結果は呼び出し元へ直接返すため _events/ 経由の Discord 通知は行わず、
+    # 失敗も例外のまま同期呼び出し元へ返す（FunctionError として観測される）。
+    if action == "list_slots":
+        return list_slots_handler(event, context)
     # "action" キーの有無で Discord からの明示実行か EventBridge 定期実行かを判別する
     # （定期実行の成功まで毎日通知するとノイズになるため、成功通知は明示実行のみ）
     explicit = "action" in event

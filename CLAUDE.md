@@ -250,6 +250,7 @@ terraform apply -var-file=../games/palworld.tfvars
 - 処理内容: ①現在アクティブなスロット名を S3（`<backup_prefix>/slots/_active_slot` オブジェクト）から取得 → ②今のワールドフォルダの中身を S3 の `<backup_prefix>/slots/<現スロット>/` へ保存（保護）→ ③フォルダの中身を削除（フォルダ名・GUID は残すため、サーバー設定の書き換えは不要）→ ④S3 の `slots/<切替先スロット>/` にデータがあれば書き戻す（無ければ空のまま＝次回起動時に新規ワールド）→ ⑤S3 の `_active_slot` を更新。
 - 権限は既存の `backup_efs` Lambda が持つ EFS 読み書き・S3 読み書きのみで足りる。ECS タスク定義の登録や `iam:PassRole` のような強い権限は付与していない。アクティブスロットの状態を SSM ではなく S3 で持つのは、backup_efs Lambda が VPC 内（NAT なし・S3 Gateway エンドポイントのみ）で動作し SSM に到達できないため。
 - `/restore` と同様、**サーバー起動中は拒否**される（`/stop` してから実行する）。
+- 切り替え先スロットが S3 に保存されていない場合は実行前に警告して中断する（スロット名の打ち間違いで意図せず新規ワールドになる事故の防止。存在チェックは backup_efs Lambda の `list_slots` アクションを同期 invoke して行う）。意図的に新規ワールドを作る場合は `new:True` オプションを付けて明示する。
 
 `save_slot`（Terraform）との違い: `save_slot` はどのゲームタイプにも使える汎用的な仕組みで完全なディレクトリ分離ができるが apply が必要。`/switch-slot` はPalworld専用だが Discord だけで完結する。切り替え頻度が高いなら `/switch-slot`、EFSごと完全に分離したい・他ゲームタイプで使いたいなら `save_slot` を使う。
 

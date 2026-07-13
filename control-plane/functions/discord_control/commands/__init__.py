@@ -93,6 +93,10 @@ def dispatch_command(command: str, options: dict) -> str:
         return _GAME_HANDLERS[command](game_name)
 
     if command == "switch-slot":
-        return cmd_switch_slot(game_name, options.get("slot", "").strip())
+        return cmd_switch_slot(
+            game_name,
+            options.get("slot", "").strip(),
+            create_new=bool(options.get("new")),
+        )
 
     return f"不明なコマンド: `/{command}`"
