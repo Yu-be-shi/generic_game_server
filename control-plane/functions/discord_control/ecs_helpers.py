@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from clients import ec2, ecs, ssm
 from constants import (
     SSM_SUFFIX_ACTIVE_SLOT,
+    SSM_SUFFIX_LAUNCH_MODE,
     SSM_SUFFIX_NOTIFIED_TASK,
     SSM_SUFFIX_PLAYERS,
     SSM_SUFFIX_READY,
@@ -260,5 +261,19 @@ def get_active_slot(prefix: str):
     """
     try:
         return ssm_get(ssm, f"{prefix}{SSM_SUFFIX_ACTIVE_SLOT}")
+    except Exception:
+        return None
+
+
+def get_launch_mode(prefix: str):
+    """
+    起動モード（"spot" / "ondemand"）を SSM から読む。
+
+    /launch-mode コマンドが /ggs/<prefix>/launch_mode へ書いた値を返す。
+    未記録（一度も /launch-mode を実行していない）・取得失敗の場合は None を返す
+    （呼び出し元は None を従来どおりの起動 = ondemand 相当として扱う）。
+    """
+    try:
+        return ssm_get(ssm, f"{prefix}{SSM_SUFFIX_LAUNCH_MODE}")
     except Exception:
         return None

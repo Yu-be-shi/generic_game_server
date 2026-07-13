@@ -18,6 +18,11 @@ SSM_SUFFIX_PLAYERS = "/players"
 SSM_SUFFIX_MAINTENANCE = "/maintenance"
 SSM_SUFFIX_NOTIFIED_TASK = "/notified_task"
 SSM_SUFFIX_ACTIVE_SLOT = "/active_slot"
+SSM_SUFFIX_LAUNCH_MODE = "/launch_mode"
+
+# --- 起動モード（/launch-mode コマンド・/start の capacityProviderStrategy 分岐）---
+LAUNCH_MODE_SPOT = "spot"
+LAUNCH_MODE_ONDEMAND = "ondemand"
 
 # --- コマンド単位の権限制御（index.py の許可リストチェックで参照）---
 # 破壊的・コスト影響のあるコマンドのみ ALLOWED_USER_IDS による制限を適用する。
@@ -30,6 +35,7 @@ RESTRICTED_COMMANDS = {
     "backup",
     "restore",
     "switch-slot",
+    "launch-mode",
 }
 
 # --- worker 系コマンド（/update・/backup・/restore・/switch-slot）の定型メッセージ断片 ---

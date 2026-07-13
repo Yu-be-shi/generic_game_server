@@ -10,6 +10,7 @@ from constants import GAME_NAME_REQUIRED, SLOT_NAME_REQUIRED
 from commands.backup import cmd_backup
 from commands.cost import cmd_cost
 from commands.games import cmd_games
+from commands.launch_mode import cmd_launch_mode
 from commands.restore import cmd_restore
 from commands.start import cmd_start
 from commands.status import cmd_status
@@ -58,6 +59,7 @@ _REQUIRED_OPTIONS = {
     "backup":      ("game",),
     "restore":     ("game",),
     "switch-slot": ("game", "slot"),
+    "launch-mode": ("game",),
 }
 
 # オプション名 → 未指定時のエラーメッセージ
@@ -98,5 +100,8 @@ def dispatch_command(command: str, options: dict) -> str:
             options.get("slot", "").strip(),
             create_new=bool(options.get("new")),
         )
+
+    if command == "launch-mode":
+        return cmd_launch_mode(game_name, options.get("mode", "").strip())
 
     return f"不明なコマンド: `/{command}`"

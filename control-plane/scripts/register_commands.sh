@@ -29,7 +29,7 @@ echo "Discord スラッシュコマンド登録"
 echo "App ID: ${DISCORD_APP_ID}"
 echo "============================================="
 
-# コマンド定義（9つ: /games /start /stop /status /cost /update /backup /restore /switch-slot）
+# コマンド定義（10個: /games /start /stop /status /cost /update /backup /restore /switch-slot /launch-mode）
 # game オプション（type=3, required, autocomplete）は6コマンドで完全に同一の形なので、
 # python3 で生成する（説明文だけが違う定型ブロックを手で9回コピペしない）。
 COMMANDS=$(python3 << 'PYEOF'
@@ -103,6 +103,24 @@ commands = [
                 "description": "True で新規ワールドの作成を明示します（未保存のスロット名は既定で警告・中断）",
                 "type": 5,
                 "required": False,
+            },
+        ],
+    },
+    {
+        "name": "launch-mode",
+        "description": "起動タイプ（Fargate Spot / 通常）を切り替えます。次回 /start から適用",
+        "type": 1,
+        "options": [
+            game_option("対象のゲーム名"),
+            {
+                "name": "mode",
+                "description": "起動タイプ（省略時は現在の設定を表示）",
+                "type": 3,
+                "required": False,
+                "choices": [
+                    {"name": "spot（約7割引・稀に中断あり）", "value": "spot"},
+                    {"name": "ondemand（通常・安定）", "value": "ondemand"},
+                ],
             },
         ],
     },

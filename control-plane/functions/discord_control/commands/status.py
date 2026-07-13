@@ -3,7 +3,7 @@ import logging
 
 import ecs_helpers
 from commands.guards import require_service
-from constants import TAG_STATUS_PARAM_PREFIX
+from constants import LAUNCH_MODE_SPOT, TAG_STATUS_PARAM_PREFIX
 
 logger = logging.getLogger()
 
@@ -34,6 +34,11 @@ def cmd_status(game_name: str) -> str:
     # 使用中のセーブデータスロット（/switch-slot 未実行なら未記録 = 既定スロット）
     active_slot = ecs_helpers.get_active_slot(ssm_prefix) if ssm_prefix else None
     slot_line = f"\n使用中スロット: `{active_slot or 'default'}`"
+
+    # 起動タイプ（/launch-mode 未実行なら未記録 = 通常）
+    launch_mode = ecs_helpers.get_launch_mode(ssm_prefix) if ssm_prefix else None
+    mode_line = "\n起動タイプ: " + ("⚡ Spot" if launch_mode == LAUNCH_MODE_SPOT else "通常")
+    slot_line += mode_line
 
     if desired == 0:
         return (

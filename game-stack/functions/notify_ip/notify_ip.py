@@ -75,6 +75,23 @@ def lambda_handler(event, context):
 
 def _handle_stopped_event(detail):
     """ECS タスク停止イベント（aws.ecs, lastStatus=STOPPED）を処理し停止通知を送る"""
+    # Fargate Spot の中断（AWS 都合のキャパシティ回収）では desiredCount=1 のまま
+    # ECS スケジューラが自動で代替タスクを起動するため「完全に停止」は誤報になる。
+    # 停止イベント時点では代替タスクが未起動のことが多く、下の残存タスク判定では
+    # 拾えないため、先に stopCode / stoppedReason で中断を判別する。
+    # stopCode は Fargate Spot で "TerminationNotice"（EC2 Spot 系の enum は
+    # "SpotInterruption"）。将来の表記ゆれに備えて理由文字列の "Spot" も見る
+    stop_code = detail.get("stopCode", "")
+    stopped_reason = detail.get("stoppedReason", "")
+    if stop_code in ("TerminationNotice", "SpotInterruption") or "Spot" in stopped_reason:
+        if send_message_safe(
+            f"⚡ **{GAME_NAME}** Fargate Spot の中断によりサーバーが一時停止しました。\n"
+            "自動的に再起動しています。接続可能になると**新しい IP** が通知されます（数分お待ちください）。\n"
+            "※ セーブデータは EFS に保存されており消えません（直近のオートセーブ以降の進行は失われる可能性があります）。"
+        ):
+            logger.info("Spot 中断通知送信完了: stopCode=%s", stop_code)
+        return
+
     # デプロイメント入れ替え（タスク定義リビジョン更新を伴う /start 等）では、
     # 旧タスクの STOPPED イベントが飛んでも新タスクでサーバーは稼働継続している。
     # その場合「完全に停止しました」は誤報になるため、代わりに稼働中タスクの

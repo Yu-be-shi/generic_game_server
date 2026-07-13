@@ -24,9 +24,9 @@
 
 ### `control-plane/` — AWS アカウントに 1 度だけデプロイ
 
-Discord ボットと**全ゲームで共有する VPC** をホスト。単一の Lambda がすべてのスラッシュコマンド（`/games`、`/start`、`/stop`、`/status`、`/cost`、`/update`、`/backup`、`/restore`、`/switch-slot`）を処理し、ECS/SSM/Cost Explorer API を直接呼び出す。
+Discord ボットと**全ゲームで共有する VPC** をホスト。単一の Lambda がすべてのスラッシュコマンド（`/games`、`/start`、`/stop`、`/status`、`/cost`、`/update`、`/backup`、`/restore`、`/switch-slot`、`/launch-mode`）を処理し、ECS/SSM/Cost Explorer API を直接呼び出す。
 
-**権限モデル（2 段階）**: 破壊的・コスト影響のあるコマンド（`/start` `/stop` `/update` `/backup` `/restore` `/switch-slot` = `constants.py` の `RESTRICTED_COMMANDS`）のみ `discord_allowed_user_ids` の許可リストで制限され、閲覧系コマンド（`/games` `/status` `/cost`）は誰でも実行できる。許可リストが未設定（空）の場合は全コマンドを全員に許可（後方互換）。新しい破壊的コマンドを追加する際は `RESTRICTED_COMMANDS` への追加を忘れないこと。
+**権限モデル（2 段階）**: 破壊的・コスト影響のあるコマンド（`/start` `/stop` `/update` `/backup` `/restore` `/switch-slot` `/launch-mode` = `constants.py` の `RESTRICTED_COMMANDS`）のみ `discord_allowed_user_ids` の許可リストで制限され、閲覧系コマンド（`/games` `/status` `/cost`）は誰でも実行できる。許可リストが未設定（空）の場合は全コマンドを全員に許可（後方互換）。新しい破壊的コマンドを追加する際は `RESTRICTED_COMMANDS` への追加を忘れないこと。
 
 ```
 Discord POST → API Gateway v2 HTTP API → Lambda (index.py)
@@ -93,6 +93,7 @@ EventBridge ルール:
 | `installed_buildid` | auto_update Lambda（アップデート成功時）| auto_update Lambda | インストール済み Steam ビルド ID |
 | `update_ready` | モニターサイドカー（アップデートタスクのみ）| auto_update Lambda | アップデートタスク完了シグナル |
 | `active_slot` | notify_backup Lambda（switch_slot 完了時のミラー）| `/status`、`/switch-slot` の同一スロットガード | 使用中のセーブデータスロット名（正本は S3 の `slots/_active_slot`）|
+| `launch_mode` | `/launch-mode` コマンド | `/start`、`/status` | 起動タイプ `spot`/`ondemand`（未作成 = ondemand 相当の従来動作）|
 
 ## Lambda パッケージング
 
@@ -257,6 +258,15 @@ terraform apply -var-file=../games/palworld.tfvars
 - 切り替え先スロットが S3 に保存されていない場合は実行前に警告して中断する（スロット名の打ち間違いで意図せず新規ワールドになる事故の防止。存在チェックは backup_efs Lambda の `list_slots` アクションを同期 invoke して行う）。意図的に新規ワールドを作る場合は `new:True` オプションを付けて明示する。
 
 `save_slot`（Terraform）との違い: `save_slot` はどのゲームタイプにも使える汎用的な仕組みで完全なディレクトリ分離ができるが apply が必要。`/switch-slot` はPalworld専用だが Discord だけで完結する。切り替え頻度が高いなら `/switch-slot`、EFSごと完全に分離したい・他ゲームタイプで使いたいなら `save_slot` を使う。
+
+## Fargate Spot 起動モード（`/launch-mode`）
+
+`/launch-mode game:<name> mode:<spot|ondemand>` で次回 `/start` からの起動タイプを切り替えられる（mode 省略で現在値を表示。`/status` にも表示される）。Spot は通常 Fargate の約 7 割引だが、AWS 都合で稀に中断される。
+
+- **仕組み**: 設定は SSM `/ggs/<prefix>/launch_mode` に保持され、`/start` が `update_service(capacityProviderStrategy=..., forceNewDeployment=True)` で反映する。パラメータ未作成なら従来どおり（ondemand 相当）。
+- **Terraform は起動モードを管理しない**: `ecs.tf` のサービスは `launch_type = "FARGATE"`（新規作成時の初期値）のまま、`ignore_changes` に `launch_type` と `capacity_provider_strategy` を含めている。⚠ これを「修正」して外すと、/start が strategy を設定した後の plan で launch_type のドリフトが検出され稼働中にサービス再作成が計画される。クラスターには `aws_ecs_cluster_capacity_providers` で FARGATE / FARGATE_SPOT を関連付け済み（default strategy は auto_update の `run_task(launchType="FARGATE")` と競合させないため未設定）。
+- **中断時の挙動**: desiredCount=1 のまま ECS が自動で代替タスクを起動する（Spot キャパシティ待ち）。notify_ip が「⚡ Spot 中断・自動再起動中」を通知し、代替タスクの受付開始時に新しい IP が通知される。**IP は変わる**。中断時は停止前の EFS→S3 同期がスキップされるが、セーブデータ本体は EFS にあり無事（毎日の定期バックアップも継続）。Spot 枯渇が長引く場合は `/launch-mode mode:ondemand` → `/stop` → `/start` で通常起動に戻す。
+- **向くゲーム / 向かないゲーム**: オートセーブが頻繁な協力サバイバル系（Palworld・Minecraft 等）は中断コスト＝数分のダウン + IP 変更 + 直近オートセーブ以降の巻き戻りで済むため好適。対戦セッション型など途中切断が致命的なゲームには不向き。
 
 ## 新しいゲームの追加
 

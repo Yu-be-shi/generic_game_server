@@ -44,13 +44,23 @@ resource "aws_ecs_cluster" "game" {
   }
 }
 
+# Fargate Spot 起動（/launch-mode コマンド）を可能にするための capacity provider 関連付け。
+# 関連付け自体は無料でタスクにも影響しない。
+# default_capacity_provider_strategy は意図的に設定しない:
+# auto_update Lambda の run_task(launchType="FARGATE") と競合させないため
+# （launchType 明示指定はクラスター既定戦略を無視するが、曖昧さを残さない）
+resource "aws_ecs_cluster_capacity_providers" "game" {
+  cluster_name       = aws_ecs_cluster.game.name
+  capacity_providers = ["FARGATE", "FARGATE_SPOT"]
+}
+
 # -----------------------------------------------------------
 # ECS タスク定義
 # -----------------------------------------------------------
 
 resource "aws_ecs_task_definition" "game" {
   family                   = local.name_prefix
-  requires_compatibilities = ["FARGATE"] # Spot は使わず通常 Fargate で安定稼働
+  requires_compatibilities = ["FARGATE"] # FARGATE / FARGATE_SPOT の両方をカバーする（Spot 専用値は存在しない）
   network_mode             = "awsvpc"
   cpu                      = var.task_cpu
   memory                   = var.task_memory
@@ -195,7 +205,10 @@ resource "aws_ecs_service" "game" {
   name            = local.service_name
   cluster         = aws_ecs_cluster.game.id
   task_definition = aws_ecs_task_definition.game.arn
-  launch_type     = "FARGATE" # Spot は使わず安定稼働を優先
+  # launch_type はサービス新規作成時の初期値としてのみ使われる。
+  # 実行時の起動モード（Spot/通常）は /start が SSM の launch_mode を読んで
+  # update_service(capacityProviderStrategy=...) で切り替える（下の ignore_changes 参照）
+  launch_type = "FARGATE"
   desired_count   = var.desired_count
 
   # EFS を Fargate で使うにはプラットフォームバージョン 1.4.0 以上が必要
@@ -221,6 +234,13 @@ resource "aws_ecs_service" "game" {
       # コンテナ定義の変更を反映する場合は停止後に手動で
       # aws ecs update-service --force-new-deployment を実行すること
       task_definition,
+      # 起動モード（Spot/通常）は /start が update_service の
+      # capacityProviderStrategy で実行時に切り替えるため Terraform では管理しない。
+      # ⚠ この 2 行を外すと、/start が strategy を設定した後の plan で
+      # launch_type のドリフト（"FARGATE" -> ""）が検出され、稼働中に
+      # サービスの再作成が計画されてしまう。絶対に外さないこと
+      launch_type,
+      capacity_provider_strategy,
     ]
   }
 

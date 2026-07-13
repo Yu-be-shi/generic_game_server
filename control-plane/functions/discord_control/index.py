@@ -14,6 +14,7 @@ Function URL 経由で Discord から POST される。
     /backup game:<name> → 今すぐ EFS→S3 のバックアップを実行
     /restore game:<name> → S3→EFS へ最新バックアップをミラーリング（要停止）
     /switch-slot game:<name> slot:<name> → セーブデータのスロットを切り替え（要停止）
+    /launch-mode game:<name> [mode:<spot|ondemand>] → 起動タイプの表示・切り替え（次回 /start から適用）
 
 各コマンドの実装本体は commands/ パッケージにコマンド単位で分割されている
 （commands/games.py, commands/start.py, ...）。共通のガード処理・AWS 呼び出し
