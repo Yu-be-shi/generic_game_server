@@ -41,7 +41,7 @@ import os
 
 from clients import lambda_client
 from commands import autocomplete_choices, dispatch_command
-from constants import RESTRICTED_COMMANDS
+from constants import EPHEMERAL_COMMANDS, RESTRICTED_COMMANDS
 from provider import get_provider
 
 logger = logging.getLogger()
@@ -132,7 +132,9 @@ def lambda_handler(event: dict, context) -> dict:
         except Exception:
             logger.exception("deferred ワーカーの invoke に失敗: command=%s", req.command)
             return provider.message("❌ コマンド処理の開始に失敗しました。しばらく後に再試行してください。")
-        return provider.deferred_response()
+        # deferred 応答の ephemeral フラグはフォローアップ（実行結果）の可視性にも
+        # 引き継がれる。EPHEMERAL_COMMANDS（/cost 等）以外はチャンネル全員に表示する
+        return provider.deferred_response(ephemeral=req.command in EPHEMERAL_COMMANDS)
 
     return provider.message("不明なリクエストタイプです。")
 

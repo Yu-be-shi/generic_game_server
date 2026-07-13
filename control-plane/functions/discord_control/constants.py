@@ -38,6 +38,14 @@ RESTRICTED_COMMANDS = {
     "launch-mode",
 }
 
+# --- 応答の可視性（index.py の deferred 応答で参照）---
+# ここに含まれるコマンドの結果は実行者のみに表示（ephemeral）。それ以外は
+# チャンネル全員に表示される（/start の起動報告などをメンバー全員が見られるように）。
+# 権限拒否などコマンド実行前のエラー応答は常に実行者のみ表示。
+EPHEMERAL_COMMANDS = {
+    "cost",  # 金額・予算情報はチャンネルに常時公開しない
+}
+
 # --- worker 系コマンド（/update・/backup・/restore・/switch-slot）の定型メッセージ断片 ---
 GAME_NAME_REQUIRED = "ゲーム名を指定してください。"
 SLOT_NAME_REQUIRED = "スロット名を指定してください。"
