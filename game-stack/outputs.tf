@@ -63,6 +63,11 @@ output "backup_bucket_name" {
   value       = aws_s3_bucket.backup.id
 }
 
+output "dashboard_url" {
+  description = "CloudWatch ダッシュボード（サーバー状態・プレイヤー数・ログの俯瞰）の URL"
+  value       = "https://${var.aws_region}.console.aws.amazon.com/cloudwatch/home?region=${var.aws_region}#dashboards:name=${aws_cloudwatch_dashboard.game.dashboard_name}"
+}
+
 # 手動操作・コスト通知疎通テストの AWS CLI コマンド集は CLAUDE.md
 # 「手動サーバー操作（Discord が使えない場合）」節を参照（ドリフトしやすい heredoc として
 # terraform output に埋め込むのではなく、ドキュメントとして一元管理する）。

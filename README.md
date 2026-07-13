@@ -251,6 +251,7 @@ terraform workspace delete palworld
 - AWS Budgets で月$13の上限を設定済み（20/50/80/100% でアラート通知）
 - コスト通知は Discord の Webhook チャンネルに届く
 - 複数のゲームが同時に起動すると費用が倍増するため注意
+- サーバー状態・プレイヤー数・ログは CloudWatch ダッシュボードで俯瞰できる（`terraform output dashboard_url`。3 ダッシュボード/アカウントまで無料枠内 = 1〜2 ゲーム運用なら $0）
 - 詳細なコスト試算・削減手順 → [`docs/cost-plan.md`](docs/cost-plan.md)
 
 ## セーブデータ移行
@@ -310,6 +311,7 @@ generic_game_server/
 │   ├── notify_ip.tf                     # IP通知 Lambda
 │   ├── auto_update.tf                  # 手動アップデート Worker Lambda
 │   ├── cost_guard.tf                   # 長時間稼働強制停止バックストップ Lambda
+│   ├── dashboard.tf                    # CloudWatch ダッシュボード / プレイヤー数メトリクスフィルタ
 │   ├── outputs.tf                      # 接続情報 / 管理コマンド
 │   ├── functions/
 │   │   ├── _shared/notifier.py         # Discord/Slack Webhook 共有モジュール

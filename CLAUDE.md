@@ -292,6 +292,7 @@ terraform apply -var-file=../games/palworld.tfvars
 - **コストガードの多層構造:** サイドカーのアイドル検知（ソフト）→ `cost_guard` Lambda のハード停止 → AWS Budgets アラート。3 つの独立した層でコストの暴走を防ぐ。
 - **Palworld は ARM64 非対応（X86_64 のまま）:** Palworld 専用サーバーは SteamCMD 配布の x86_64 バイナリのみで ARM64 ネイティブビルドが存在しない。Graviton で動かすには box64/FEX エミュレーションが必要で、オーバーヘッドが約 20% 削減分を相殺し安定性も低下するため採用しない。ARM64 は `docker manifest inspect` でネイティブ arm64 対応が確認できるゲーム（Minecraft Java 等）にのみ設定する。
 - **EFS ストレージクラスと階層化:** `efs_storage_class = "regional"`（既定）は複数 AZ 冗長 + 30 日 IA 移行 + 90 日 Archive 移行の 3 段階で自動コスト逓減。`"one_zone"` は単一 AZ で約 45% 安だが Archive 非対応で IA 止まり、かつ作成後変更不可。長期間プレイしないゲームは terraform destroy で EFS 課金をゼロにできる（S3 バックアップから復元可能）。
+- **CloudWatch ダッシュボード（`dashboard.tf`）:** ゲームごとに 1 ダッシュボード（名前 = name_prefix、URL は `terraform output dashboard_url`）。プレイヤー数はタスクロールに `PutMetricData` を追加せず、monitor の定型ログ行 `[monitor] PLAYERS <n>` をメトリクスフィルタで `GGS/<name_prefix>/PlayersOnline` に変換する（停止中はデータなし = 課金なし）。ダッシュボード 3 個/アカウント・カスタムメトリクス 10 個までは常時無料枠内で、1〜2 ゲーム運用なら $0。Container Insights は引き続き無効。
 - **`/update` は update_service ではなく run_task を使用:** auto_update Lambda は `ecs.run_task` で `UPDATE_ON_BOOT=true` を設定した単発タスクを実行する。このタスクのモニターサイドカーは EventBridge 非対象の SSM パラメータ（`update_ready`）とダミーサービス名にリダイレクトされ、余分な IP 通知や誤ったサービス停止を防ぐ。
 
 ## 状態管理

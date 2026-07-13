@@ -446,6 +446,12 @@ while true; do
         ''|*[!0-9-]*) conn_count=0 ;;  # 非数値 → 0 に正規化
     esac
 
+    # CloudWatch メトリクスフィルタ用の定型行（dashboard.tf が "PLAYERS <数値>" をパースする）。
+    # プレイヤー数不明（-1）は出力しない = メトリクスを偽の値で汚さない
+    if [ "${conn_count}" -ge 0 ] 2>/dev/null; then
+        log "PLAYERS ${conn_count}"
+    fi
+
     if [ "${conn_count}" = "-1" ]; then
         # REST API 認証エラー等 → プレイヤー数不明。カウンタ変更なし
         log "警告: プレイヤー数が不明（REST API 認証エラー？ADMIN_PASSWORD を確認）。アイドルカウンタを変更しません。"
