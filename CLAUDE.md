@@ -26,6 +26,8 @@
 
 Discord ボットと**全ゲームで共有する VPC** をホスト。単一の Lambda がすべてのスラッシュコマンド（`/games`、`/start`、`/stop`、`/status`、`/cost`、`/update`、`/backup`、`/restore`、`/switch-slot`）を処理し、ECS/SSM/Cost Explorer API を直接呼び出す。
 
+**権限モデル（2 段階）**: 破壊的・コスト影響のあるコマンド（`/start` `/stop` `/update` `/backup` `/restore` `/switch-slot` = `constants.py` の `RESTRICTED_COMMANDS`）のみ `discord_allowed_user_ids` の許可リストで制限され、閲覧系コマンド（`/games` `/status` `/cost`）は誰でも実行できる。許可リストが未設定（空）の場合は全コマンドを全員に許可（後方互換）。新しい破壊的コマンドを追加する際は `RESTRICTED_COMMANDS` への追加を忘れないこと。
+
 ```
 Discord POST → API Gateway v2 HTTP API → Lambda (index.py)
   ├─ ed25519.py: リクエスト署名の検証

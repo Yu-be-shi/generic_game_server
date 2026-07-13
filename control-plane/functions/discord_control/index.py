@@ -40,6 +40,7 @@ import os
 
 from clients import lambda_client
 from commands import autocomplete_choices, dispatch_command
+from constants import RESTRICTED_COMMANDS
 from provider import get_provider
 
 logger = logging.getLogger()
@@ -93,14 +94,25 @@ def lambda_handler(event: dict, context) -> dict:
         return provider.ping_response()
 
     # --- オートコンプリート（game: オプションの候補補完）---
+    # 認証は行わない（返すのはゲーム名の一覧のみで、制限コマンドの実行自体は
+    # 下の許可リストチェックで拒否されるため実害がない）
     if req.kind == "autocomplete":
         choices = autocomplete_choices(req.focused)
         return provider.autocomplete(choices)
 
     # --- スラッシュコマンド ---
     if req.kind == "command":
-        if ALLOWED_USER_IDS and req.user_id not in ALLOWED_USER_IDS:
-            return provider.message("⛔ このボットを操作する権限がありません。")
+        # 破壊的・コスト影響のあるコマンド（RESTRICTED_COMMANDS）のみ許可リストで制限する。
+        # 閲覧系（/games /status /cost）は誰でも実行可。ALLOWED_USER_IDS 未設定なら全コマンド全員許可
+        if (
+            ALLOWED_USER_IDS
+            and req.command in RESTRICTED_COMMANDS
+            and req.user_id not in ALLOWED_USER_IDS
+        ):
+            return provider.message(
+                "⛔ このコマンドを実行する権限がありません。\n"
+                "閲覧系コマンド（/games /status /cost）は誰でも利用できます。"
+            )
         # 重い AWS API 呼び出しを自己非同期 invoke に移譲し、3 秒以内に deferred を返す。
         # ワーカーが処理後に send_followup() で「考え中…」を結果に上書きする。
         try:

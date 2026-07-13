@@ -19,6 +19,19 @@ SSM_SUFFIX_MAINTENANCE = "/maintenance"
 SSM_SUFFIX_NOTIFIED_TASK = "/notified_task"
 SSM_SUFFIX_ACTIVE_SLOT = "/active_slot"
 
+# --- コマンド単位の権限制御（index.py の許可リストチェックで参照）---
+# 破壊的・コスト影響のあるコマンドのみ ALLOWED_USER_IDS による制限を適用する。
+# ここに無いコマンド（/games /status /cost = 閲覧系）は誰でも実行できる。
+# 新しい破壊的コマンドを追加したら必ずこのセットにも追加すること。
+RESTRICTED_COMMANDS = {
+    "start",
+    "stop",
+    "update",
+    "backup",
+    "restore",
+    "switch-slot",
+}
+
 # --- worker 系コマンド（/update・/backup・/restore・/switch-slot）の定型メッセージ断片 ---
 GAME_NAME_REQUIRED = "ゲーム名を指定してください。"
 SLOT_NAME_REQUIRED = "スロット名を指定してください。"
